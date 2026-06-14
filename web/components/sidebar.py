@@ -1,4 +1,4 @@
-"""Sidebar: stock input, LLM config, and history list."""
+"""Sidebar: navigation, stock input, LLM config, history."""
 
 from __future__ import annotations
 
@@ -9,140 +9,116 @@ import streamlit as st
 from tradingagents.llm_clients.model_catalog import MODEL_OPTIONS
 from web.history import get_history
 
-# Provider display names in recommended order
 _PROVIDERS: list[tuple[str, str]] = [
-    ("MiniMax（推荐·国内直连）", "minimax"),
     ("DeepSeek", "deepseek"),
     ("通义千问 Qwen", "qwen"),
     ("智谱 GLM", "glm"),
+    ("MiniMax", "minimax"),
     ("OpenAI", "openai"),
     ("Anthropic", "anthropic"),
     ("Google Gemini", "google"),
     ("xAI Grok", "xai"),
-    ("Ollama（本地）", "ollama"),
+    ("Ollama", "ollama"),
 ]
 
-_PROVIDER_DISPLAY = [name for name, _ in _PROVIDERS]
-_PROVIDER_KEYS = [key for _, key in _PROVIDERS]
+_PROVIDER_DISPLAY = [n for n, _ in _PROVIDERS]
+_PROVIDER_KEYS = [k for _, k in _PROVIDERS]
 
-
-def _resolve_user_input(raw: str) -> tuple[str, str | None]:
-    """Resolve raw user input to (ticker_code, error_msg).
-
-    Accepts 6-digit codes or Chinese stock names (e.g. '宝光股份').
-    Returns (code, None) on success or ("", error_msg) on failure.
-    """
+def _resolve_user_input(raw: str) -> tuple:
     from tradingagents.dataflows.a_stock import resolve_ticker
-
     try:
-        code = resolve_ticker(raw)
-        return code, None
+        return resolve_ticker(raw), None
     except ValueError as e:
         return "", str(e)
 
 
-def _render_llm_config() -> None:
-    """Render LLM provider and model selection controls."""
+def _render_llm_config():
+    idx = st.selectbox("LLM 供应商", range(len(_PROVIDERS)),
+                       format_func=lambda i: _PROVIDER_DISPLAY[i], key="llm_provider_idx")
+    provider = _PROVIDER_KEYS[idx]
+    st.session_state["llm_provider"] = provider
 
-    provider_idx = st.selectbox(
-        "LLM 供应商",
-        range(len(_PROVIDERS)),
-        format_func=lambda i: _PROVIDER_DISPLAY[i],
-        key="llm_provider_idx",
-        help="选择你配置了 API Key 的供应商",
-    )
-    provider_key = _PROVIDER_KEYS[provider_idx]
-    st.session_state["llm_provider"] = provider_key
-
-    if provider_key in MODEL_OPTIONS:
-        quick_options = MODEL_OPTIONS[provider_key]["quick"]
-        deep_options = MODEL_OPTIONS[provider_key]["deep"]
-
-        quick_labels = [label for label, _ in quick_options]
-        quick_values = [value for _, value in quick_options]
-        deep_labels = [label for label, _ in deep_options]
-        deep_values = [value for _, value in deep_options]
-
-        quick_idx = st.selectbox(
-            "快速思考模型",
-            range(len(quick_options)),
-            format_func=lambda i: quick_labels[i],
-            key="quick_model_idx",
-            help="用于常规分析任务，速度优先",
-        )
-        st.session_state["quick_think_llm"] = quick_values[quick_idx]
-
-        deep_idx = st.selectbox(
-            "深度思考模型",
-            range(len(deep_options)),
-            format_func=lambda i: deep_labels[i],
-            key="deep_model_idx",
-            help="用于辩论/决策等需要深度推理的任务",
-        )
-        st.session_state["deep_think_llm"] = deep_values[deep_idx]
+    if provider in MODEL_OPTIONS:
+        qo = MODEL_OPTIONS[provider]["quick"]
+        do = MODEL_OPTIONS[provider]["deep"]
+        qi = st.selectbox("快速模型", range(len(qo)),
+                          format_func=lambda i: qo[i][0], key="quick_model_idx")
+        di = st.selectbox("深度模型", range(len(do)),
+                          format_func=lambda i: do[i][0], key="deep_model_idx")
+        st.session_state["quick_think_llm"] = qo[qi][1]
+        st.session_state["deep_think_llm"] = do[di][1]
     else:
-        custom_quick = st.text_input("快速思考模型 ID", key="custom_quick_model")
-        custom_deep = st.text_input("深度思考模型 ID", key="custom_deep_model")
-        st.session_state["quick_think_llm"] = custom_quick
-        st.session_state["deep_think_llm"] = custom_deep
+        st.session_state["quick_think_llm"] = st.text_input("快速模型ID", key="cq")
+        st.session_state["deep_think_llm"] = st.text_input("深度模型ID", key="cd")
 
 
-def render_sidebar() -> None:
-    """Render the sidebar with input controls and history."""
+def render_sidebar():
+    from tradingagents.auth import get_license_status, is_premium
+
+    license_status = get_license_status()
+    premium = license_status.get("valid", False)
 
     st.markdown(
-        """
-        <div style="text-align:center; margin-bottom:1.5rem;">
-            <span style="font-size:2rem; font-weight:800; color:#ff5a1f;">Trading</span><span style="font-size:2rem; font-weight:800; color:#f5f1eb;">Agents</span><span style="font-size:2rem; font-weight:800; color:#f5f1eb;">-</span><span style="font-size:2rem; font-weight:800; color:#ff5a1f;">Astock</span>
-            <div style="font-size:0.85rem; color:#888; margin-top:0.2rem;">
-                A股多Agent投研系统
-            </div>
-            <div style="font-size:0.7rem; color:#555; margin-top:0.3rem;">
-                by <a href="https://github.com/simonlin1212" style="color:#ff5a1f; text-decoration:none;">simonlin1212</a>
-            </div>
-        </div>
-        """,
+        '<div style="text-align:center;margin-bottom:0.5rem;">'
+        '<span style="font-size:1.1rem;font-weight:800;color:#f5f1eb;">'
+        'A股量化系统</span></div>',
         unsafe_allow_html=True,
     )
+
+    status_color = "#22c55e" if premium else "#f97316"
+    st.markdown(
+        f'<div style="text-align:center;margin-bottom:0.3rem;font-size:0.8rem;color:{status_color}">'
+        f'{license_status.get("display", "🔒 免费版")}</div>',
+        unsafe_allow_html=True,
+    )
+    if not premium:
+        st.page_link("pages/activate.py", label="🔑 赞赏激活", use_container_width=True)
+    else:
+        st.page_link("pages/admin.py", label="🛡️ 管理员", use_container_width=True)
+
+    st.markdown("---")
+    st.caption("📋 功能导航")
+    premium_pages = {"深度分析", "AI 荐股", "因子引擎", "股票监控", "模拟盘"}
+    nav_items = [
+        ("📈 深度分析", "app.py", "深度分析"),
+        ("🏠 大盘看盘", "pages/1_Market_Dashboard.py", "大盘看盘"),
+        ("📊 板块分析", "pages/2_Sector_Board.py", "板块分析"),
+        ("🔍 一键选股", "pages/3_Stock_Screener.py", "一键选股"),
+        ("🧠 AI 荐股", "pages/4_AI_Picks.py", "AI 荐股"),
+        ("⚙️ 因子引擎", "pages/5_Factor_Engine.py", "因子引擎"),
+        ("📡 股票监控", "pages/6_Stock_Monitor.py", "股票监控"),
+        ("💰 模拟盘", "pages/7_Paper_Trade.py", "模拟盘"),
+        ("🧩 缠论Agent", "pages/8_Chan_Agent.py", "缠论Agent"),
+        ("📚 知识库", "pages/9_Knowledge_Base.py", "知识库"),
+    ]
+    for label, target, page_name in nav_items:
+        lock = " 🔒" if (not premium and page_name in premium_pages) else ""
+        if st.button(label + lock, key=f"nav_{target}", use_container_width=True):
+            st.switch_page(target)
 
     st.markdown("---")
     st.markdown("#### 新建分析")
 
-    ticker = st.text_input(
-        "股票代码",
-        placeholder="例: 300750 或 宁德时代",
-        key="input_ticker",
-        help="输入6位A股代码或中文股票全称",
-    )
+    ticker = st.text_input("股票代码", placeholder="例: 300750 或 宁德时代", key="input_ticker")
+    trade_date = st.date_input("分析日期", value=date.today(), key="input_date")
 
-    trade_date = st.date_input(
-        "分析日期",
-        value=date.today(),
-        key="input_date",
-    )
-
-    with st.expander("⚙️ 模型配置", expanded=False):
+    with st.expander("模型配置", expanded=False):
         _render_llm_config()
 
     tracker = st.session_state.get("tracker")
-    is_busy = tracker is not None and tracker.is_running
+    busy = tracker is not None and tracker.is_running
 
     if st.button(
-        "开始分析" if not is_busy else "分析进行中...",
-        use_container_width=True,
-        disabled=is_busy or not ticker,
-        type="primary",
+        "开始分析" if not busy else "分析中...",
+        use_container_width=True, disabled=busy or not ticker, type="primary",
     ):
-        resolved_code, err = _resolve_user_input(ticker)
+        code, err = _resolve_user_input(ticker)
         if err:
             st.error(f"❌ {err}")
         else:
-            if resolved_code != ticker.strip():
-                st.success(f"✅ {ticker.strip()} → {resolved_code}")
-            st.session_state["start_analysis"] = {
-                "ticker": resolved_code,
-                "trade_date": trade_date.strftime("%Y-%m-%d"),
-            }
+            if code != ticker.strip():
+                st.success(f"✅ {ticker.strip()} -> {code}")
+            st.session_state["start_analysis"] = {"ticker": code, "trade_date": trade_date.strftime("%Y-%m-%d")}
             st.session_state["viewing_history"] = None
 
     st.markdown("---")
@@ -155,10 +131,6 @@ def render_sidebar() -> None:
 
     for entry in history[:20]:
         t, d = entry["ticker"], entry["date"]
-        label = f"{t}  ·  {d}"
-        if st.button(label, key=f"hist_{t}_{d}", use_container_width=True):
+        if st.button(f"{t}  ·  {d}", key=f"hist_{t}_{d}", use_container_width=True):
             st.session_state["viewing_history"] = entry["path"]
             st.session_state["start_analysis"] = None
-
-    st.markdown("---")
-    st.caption("⚠️ 仅供学习研究，不构成投资建议")

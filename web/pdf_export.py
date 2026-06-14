@@ -11,8 +11,18 @@ from fpdf import FPDF
 
 
 _FONT_CANDIDATES = [
+    # Windows TTF first (TrueType, not collection — better fpdf2 support)
+    "C:/Windows/Fonts/simhei.ttf",
+    "C:/Windows/Fonts/simkai.ttf",
+    "C:/Windows/Fonts/simfang.ttf",
+    "C:/Windows/Fonts/simsunb.ttf",
+    # Windows TTC fallback
+    "C:/Windows/Fonts/msyh.ttc",
+    "C:/Windows/Fonts/simsun.ttc",
+    # Mac
     "/System/Library/Fonts/PingFang.ttc",
     "/System/Library/Fonts/STHeiti Light.ttc",
+    # Linux
     "/usr/share/fonts/truetype/noto/NotoSansSC-Regular.ttf",
     "/usr/share/fonts/noto-cjk/NotoSansCJKsc-Regular.otf",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
@@ -21,8 +31,9 @@ _FONT_CANDIDATES = [
 
 def _find_cjk_font() -> str | None:
     for path in _FONT_CANDIDATES:
-        if Path(path).exists():
-            return path
+        p = Path(path)
+        if p.exists():
+            return str(p)
     return None
 
 
@@ -70,7 +81,7 @@ class _ReportPDF(FPDF):
         font_path = _find_cjk_font()
         if font_path:
             self.add_font("CJK", "", font_path, uni=True)
-            self.add_font("CJK", "B", font_path, uni=True)
+            self.add_font("CJK", "B", font_path, uni=True)  # SimHei is already bold
             self._has_cjk = True
 
     def _use_font(self, style: str = "", size: int = 10) -> None:
@@ -82,7 +93,7 @@ class _ReportPDF(FPDF):
     def header(self) -> None:
         self._use_font("", 8)
         self.set_text_color(150, 150, 150)
-        self.cell(0, 6, f"A股多Agent投研分析  |  {self.ticker}  |  {self.trade_date}", align="C")
+        self._safe_cell(0, 6, f"A股多Agent投研分析  |  {self.ticker}  |  {self.trade_date}", align="C")
         self.ln(8)
         self.set_draw_color(60, 60, 60)
         self.line(10, self.get_y(), self.w - 10, self.get_y())
@@ -92,11 +103,11 @@ class _ReportPDF(FPDF):
         self.set_y(-15)
         self._use_font("", 8)
         self.set_text_color(120, 120, 120)
-        self.cell(0, 5, f"Page {self.page_no()}/{{nb}}", align="C")
+        self._safe_cell(0, 5, f"Page {self.page_no()}/{{nb}}", align="C")
         self.ln(4)
         self._use_font("", 6)
         self.set_text_color(160, 160, 160)
-        self.cell(0, 4, "仅供学习研究，不构成投资建议", align="C")
+        self._safe_cell(0, 4, "仅供学习研究，不构成投资建议", align="C")
 
     def add_cover(self) -> None:
         self.add_page()
@@ -145,9 +156,32 @@ class _ReportPDF(FPDF):
         cleaned = _strip_think(content)
         self._render_markdown(cleaned)
 
+    @property
+    def _text_width(self) -> float:
+        """Usable text width accounting for margins."""
+        return self.w - self.l_margin - self.r_margin
+
+    def _safe_multi_cell(self, h: float, text: str):
+        """multi_cell with explicit width to avoid CJK font issues."""
+        try:
+            self.multi_cell(self._text_width, h, text)
+        except Exception:
+            # Fallback: use ASCII-only or skip
+            safe = text.encode("ascii", errors="replace").decode("ascii")
+            self.multi_cell(self._text_width, h, safe)
+
+    def _safe_cell(self, w: float, h: float, text: str, **kwargs):
+        """cell with explicit width."""
+        try:
+            self.cell(w or self._text_width, h, text, **kwargs)
+        except Exception:
+            safe = text.encode("ascii", errors="replace").decode("ascii")
+            self.cell(w or self._text_width, h, safe, **kwargs)
+
     def _render_markdown(self, text: str) -> None:
         """Render markdown-formatted text with basic styling."""
         lines = text.split("\n")
+        w = self._text_width
         i = 0
         while i < len(lines):
             line = lines[i]
@@ -243,7 +277,14 @@ class _ReportPDF(FPDF):
 
 
 def generate_pdf(final_state: dict[str, Any], ticker: str, trade_date: str, signal: str) -> bytes:
-    """Generate a PDF report and return it as bytes."""
+    """Generate a PDF report and return it as bytes. Falls back to simple PDF on CJK error."""
+    try:
+        return _generate_pdf_inner(final_state, ticker, trade_date, signal)
+    except Exception:
+        return _generate_simple_pdf(ticker, trade_date, signal)
+
+
+def _generate_pdf_inner(final_state, ticker, trade_date, signal):
     pdf = _ReportPDF(ticker, trade_date, signal)
     pdf.alias_nb_pages()
     pdf.set_auto_page_break(auto=True, margin=20)
@@ -292,4 +333,23 @@ def generate_pdf(final_state: dict[str, Any], ticker: str, trade_date: str, sign
     if final_decision:
         pdf.add_section("最终决策", _strip_think(str(final_decision)))
 
+    return bytes(pdf.output())
+
+
+def _generate_simple_pdf(ticker: str, trade_date: str, signal: str) -> bytes:
+    """Minimal ASCII-safe PDF report as fallback when CJK font fails."""
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, f"Trading Report: {ticker}", align="C")
+    pdf.ln(8)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 6, f"Date: {trade_date}  |  Signal: {signal}", align="C")
+    pdf.ln(12)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.multi_cell(0, 5,
+                   "This is a simplified report due to font rendering limitations.\n"
+                   "Please view the full report in the web interface.\n\n"
+                   "Disclaimer: Generated by AI for research purposes only.\n"
+                   "This does NOT constitute investment advice.")
     return bytes(pdf.output())

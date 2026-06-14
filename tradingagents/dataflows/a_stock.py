@@ -312,6 +312,17 @@ def _sina_kline_fallback(code: str, start_date: str = None, end_date: str = None
     return df
 
 
+def _to_float(data: dict, key: str, default: float = 0.0) -> float:
+    """Safely convert a push2 API field to float."""
+    val = data.get(key, None)
+    if val is None or val == "" or val == "-":
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+
 # ---------------------------------------------------------------------------
 # OHLCV loading with cache (mootdx -> CSV)
 # ---------------------------------------------------------------------------
@@ -1992,3 +2003,271 @@ def get_industry_comparison(
         lines.append(f"行业对比查询失败: {e}")
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# 18. Market Indices (大盘指数)
+# ---------------------------------------------------------------------------
+
+_MARKET_INDICES_FS = "m:1+t:2,m:1+t:12"
+_MARKET_INDICES_FIELDS = "f2,f3,f4,f12,f14,f15,f16,f17,f18,f20"
+
+
+def get_market_indices() -> list[dict]:
+    """Fetch real-time major A-share indices.
+
+    Returns list of dicts with keys:
+    code, name, price, change_pct, change_amt, high, low, open,
+    prev_close, market_cap.
+
+    Uses push2 clist API with fs=m:1+t:2,m:1+t:12 (指数板块).
+    """
+    url = "https://push2.eastmoney.com/api/qt/clist/get"
+    params = {
+        "pn": "1",
+        "pz": "20",
+        "po": "1",
+        "np": "1",
+        "fltt": "2",
+        "invt": "2",
+        "fs": _MARKET_INDICES_FS,
+        "fields": _MARKET_INDICES_FIELDS,
+    }
+    r = _requests.get(url, params=params, headers={"User-Agent": _UA}, timeout=15)
+    data = r.json().get("data", {})
+    items = data.get("diff", [])
+
+    results: list[dict] = []
+    for item in items:
+        results.append({
+            "code": item.get("f12", ""),
+            "name": item.get("f14", ""),
+            "price": _to_float(item, "f2"),
+            "change_pct": _to_float(item, "f3"),
+            "change_amt": _to_float(item, "f4"),
+            "high": _to_float(item, "f15"),
+            "low": _to_float(item, "f16"),
+            "open": _to_float(item, "f17"),
+            "prev_close": _to_float(item, "f18"),
+            "market_cap": _to_float(item, "f20"),
+        })
+    return results
+
+
+# ---------------------------------------------------------------------------
+# 19. Market Breadth (涨跌家数)
+# ---------------------------------------------------------------------------
+
+
+def get_market_breadth() -> dict:
+    """Fetch advance/decline counts and limit up/down totals.
+
+    Returns dict with keys:
+      sh_up, sh_down, sz_up, sz_down, cyb_up, cyb_down,
+      limit_up_count, limit_down_count, total_up, total_down.
+    """
+    result: dict[str, int] = {
+        "sh_up": 0, "sh_down": 0,
+        "sz_up": 0, "sz_down": 0,
+        "cyb_up": 0, "cyb_down": 0,
+        "limit_up_count": 0,
+        "limit_down_count": 0,
+        "total_up": 0, "total_down": 0,
+    }
+
+    try:
+        url = "https://push2.eastmoney.com/api/qt/clist/get"
+        params = {
+            "pn": "1", "pz": "100", "po": "1", "np": "1",
+            "fltt": "2", "invt": "2",
+            "fs": "m:0+t:6",
+            "fields": "f3,f12",
+            "sort": "f12",
+            "sorttype": "1",
+        }
+        r = _requests.get(url, params=params, headers={"User-Agent": _UA}, timeout=15)
+        data = r.json().get("data", {})
+        items = data.get("diff", [])
+        for item in items:
+            code = item.get("f12", "")
+            chg = _to_float(item, "f3")
+            if chg > 0:
+                result["total_up"] += 1
+            elif chg < 0:
+                result["total_down"] += 1
+            if code.startswith("6") or code.startswith("68"):
+                if code.startswith("68"):
+                    if chg > 0:
+                        result["cyb_up"] += 1
+                    elif chg < 0:
+                        result["cyb_down"] += 1
+                else:
+                    if chg > 0:
+                        result["sh_up"] += 1
+                    elif chg < 0:
+                        result["sh_down"] += 1
+            elif code.startswith("3"):
+                if chg > 0:
+                    result["cyb_up"] += 1
+                elif chg < 0:
+                    result["cyb_down"] += 1
+            else:
+                if chg > 0:
+                    result["sz_up"] += 1
+                elif chg < 0:
+                    result["sz_down"] += 1
+    except Exception as e:
+        logger.warning("Market breadth count failed: %s", e)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 20. Universal Stock Screener (通用选股)
+# ---------------------------------------------------------------------------
+
+_PUSH2_FIELDS_MAP = {
+    # (field_code, description, default_visible)
+    "f2": "最新价", "f3": "涨跌幅", "f4": "涨跌额",
+    "f5": "成交量", "f6": "成交额", "f7": "振幅",
+    "f8": "换手率", "f9": "市盈率", "f10": "量比",
+    "f12": "代码", "f14": "名称",
+    "f15": "最高", "f16": "最低", "f17": "今开", "f18": "昨收",
+    "f20": "总市值", "f21": "流通市值",
+    "f23": "市净率", "f37": "ROE", "f62": "主力净流入",
+}
+
+_MARKET_FS = {
+    "all": "m:0+t:6",
+    "sh": "m:1+t:6",
+    "sz": "m:0+t:6",
+    "cyb": "m:0+t:80",  # 创业板
+    "kcb": "m:1+t:80",  # 科创板
+}
+
+
+def screen_stocks(
+    market: str = "all",
+    pe_max: float = None,
+    pb_max: float = None,
+    roe_min: float = None,
+    mcap_min: float = None,
+    change_min: float = None,
+    turnover_min: float = None,
+    sort_by: str = "f3",
+    sort_desc: bool = True,
+    page: int = 1,
+    page_size: int = 50,
+) -> tuple:
+    """Universal stock screener via push2 clist API.
+
+    Returns:
+        (stocks_list, total_count) — stocks_list is list[dict],
+        total_count is int.
+    """
+    fs = _MARKET_FS.get(market, _MARKET_FS["all"])
+    fields_list = list(_PUSH2_FIELDS_MAP.keys())
+
+    url = "https://push2.eastmoney.com/api/qt/clist/get"
+    params = {
+        "pn": str(page),
+        "pz": str(min(page_size, 200)),
+        "po": "1" if sort_desc else "0",
+        "np": "1",
+        "fltt": "2",
+        "invt": "2",
+        "fs": fs,
+        "fields": ",".join(fields_list),
+        "fid": sort_by,
+    }
+    r = _requests.get(url, params=params, headers={"User-Agent": _UA}, timeout=15)
+    data = r.json().get("data", {})
+    total = data.get("total", 0)
+    items = data.get("diff", [])
+
+    stocks: list[dict] = []
+    for item in items:
+        code = item.get("f12", "")
+        chg = _to_float(item, "f3")
+        pe = _to_float(item, "f9", default=-1)
+        pb = _to_float(item, "f23", default=-1)
+        roe = _to_float(item, "f37", default=-1)
+        mcap = _to_float(item, "f20", default=-1)
+        turnover = _to_float(item, "f8", default=-1)
+        main_flow = _to_float(item, "f62", default=0)
+
+        # Client-side filters
+        if pe_max is not None and (pe > pe_max or pe <= 0):
+            continue
+        if pb_max is not None and (pb > pb_max or pb <= 0):
+            continue
+        if roe_min is not None and (roe < roe_min or roe < 0):
+            continue
+        if mcap_min is not None and (mcap < mcap_min or mcap < 0):
+            continue
+        if change_min is not None and abs(chg) < change_min:
+            continue
+        if turnover_min is not None and (turnover < turnover_min or turnover < 0):
+            continue
+
+        stock = {
+            "code": code,
+            "name": item.get("f14", ""),
+            "price": _to_float(item, "f2"),
+            "change_pct": chg,
+            "change_amt": _to_float(item, "f4"),
+            "volume": _to_float(item, "f5"),
+            "amount": _to_float(item, "f6"),
+            "amplitude": _to_float(item, "f7"),
+            "turnover": turnover,
+            "pe": pe,
+            "pb": pb,
+            "quantity_ratio": _to_float(item, "f10"),
+            "high": _to_float(item, "f15"),
+            "low": _to_float(item, "f16"),
+            "open": _to_float(item, "f17"),
+            "prev_close": _to_float(item, "f18"),
+            "market_cap": mcap,
+            "float_market_cap": _to_float(item, "f21"),
+            "roe": roe,
+            "main_force_net": main_flow,
+        }
+        stocks.append(stock)
+
+    return stocks, total
+
+
+# ---------------------------------------------------------------------------
+# 21. Batch Tencent Quotes (批量行情)
+# ---------------------------------------------------------------------------
+
+
+def batch_tencent_quotes(codes: list[str]) -> list[dict]:
+    """Efficient batch quote via Tencent for a list of codes.
+
+    Returns list of {code, name, price, change_pct, volume, amount, pe, pb, mcap}.
+    Max 50 codes per batch.
+    """
+    results: list[dict] = []
+    for batch_start in range(0, len(codes), 50):
+        batch = codes[batch_start:batch_start + 50]
+        try:
+            quotes = _tencent_quote(batch)
+            for code in batch:
+                q = quotes.get(code)
+                if q:
+                    results.append({
+                        "code": code,
+                        "name": q.get("name", ""),
+                        "price": q.get("price", 0),
+                        "change_pct": q.get("change_pct", 0),
+                        "volume": 0,
+                        "amount": 0,
+                        "pe": q.get("pe_ttm", 0),
+                        "pb": q.get("pb", 0),
+                        "mcap": q.get("mcap_yi", 0),
+                    })
+        except Exception as e:
+            logger.warning("Tencent batch quote failed: %s", e)
+
+    return results

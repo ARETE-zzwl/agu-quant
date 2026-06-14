@@ -81,7 +81,7 @@ def render_report(
         st.download_button(
             "📥 下载 PDF 报告",
             data=pdf_bytes,
-            file_name=f"TradingAgents-Astock_{ticker}_{trade_date}.pdf",
+            file_name=f"{ticker}_{trade_date}_分析报告.pdf",
             mime="application/pdf",
             use_container_width=True,
         )

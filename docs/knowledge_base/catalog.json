@@ -1,0 +1,70 @@
+{
+  "version": "2026-05-28",
+  "purpose": "A-share AI trading agent knowledge base for retrieval, documentation, and strategy governance.",
+  "documents": [
+    {
+      "id": "chan.overview",
+      "title": "缠论总览",
+      "path": "chan/00_overview.md",
+      "tags": ["chan", "overview", "trading-system"],
+      "priority": 1
+    },
+    {
+      "id": "chan.concepts",
+      "title": "缠论核心概念",
+      "path": "chan/01_concepts.md",
+      "tags": ["chan", "fractal", "stroke", "center", "divergence"],
+      "priority": 1
+    },
+    {
+      "id": "chan.signals",
+      "title": "缠论买卖点与策略",
+      "path": "chan/02_signals_and_strategies.md",
+      "tags": ["chan", "buy-sell-point", "strategy", "backtest"],
+      "priority": 1
+    },
+    {
+      "id": "chan.engineering",
+      "title": "缠论工程化规则",
+      "path": "chan/03_engineering_rules.md",
+      "tags": ["chan", "engineering", "agent", "implementation"],
+      "priority": 1
+    },
+    {
+      "id": "market.a_share_rules",
+      "title": "A股交易规则",
+      "path": "market/a_share_trading_rules.md",
+      "tags": ["a-share", "trading-rules", "t-plus-one", "limit-up-down"],
+      "priority": 1
+    },
+    {
+      "id": "quant.factors",
+      "title": "量化因子体系",
+      "path": "quant/factor_framework.md",
+      "tags": ["factor", "value", "quality", "momentum", "low-volatility"],
+      "priority": 2
+    },
+    {
+      "id": "quant.indicators",
+      "title": "技术指标体系",
+      "path": "quant/technical_indicators.md",
+      "tags": ["technical-indicator", "macd", "rsi", "bollinger", "volume"],
+      "priority": 2
+    },
+    {
+      "id": "quant.backtesting_risk",
+      "title": "回测与风控规范",
+      "path": "quant/backtesting_and_risk.md",
+      "tags": ["backtest", "risk", "validation", "position-sizing"],
+      "priority": 1
+    },
+    {
+      "id": "agent.usage",
+      "title": "AI Agent使用规范",
+      "path": "agent_usage.md",
+      "tags": ["agent", "retrieval", "prompt", "guardrail"],
+      "priority": 1
+    }
+  ]
+}
+
