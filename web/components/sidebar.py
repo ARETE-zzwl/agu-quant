@@ -77,9 +77,9 @@ def render_sidebar():
         st.page_link("pages/admin.py", label="🛡️ 管理员", use_container_width=True)
 
     st.markdown("---")
-    st.caption("📋 功能导航")
-    premium_pages = {"深度分析", "AI 荐股", "因子引擎", "股票监控", "模拟盘"}
-    nav_items = [
+    st.caption("📋 股票功能")
+    premium_pages = {"深度分析", "AI 荐股", "因子引擎", "股票监控", "模拟盘", "基金中心"}
+    stock_nav_items = [
         ("📈 深度分析", "app.py", "深度分析"),
         ("🏠 大盘看盘", "pages/1_Market_Dashboard.py", "大盘看盘"),
         ("📊 板块分析", "pages/2_Sector_Board.py", "板块分析"),
@@ -92,7 +92,16 @@ def render_sidebar():
         ("🧩 缠论Agent", "pages/8_Chan_Agent.py", "缠论Agent"),
         ("📚 知识库", "pages/9_Knowledge_Base.py", "知识库"),
     ]
-    for label, target, page_name in nav_items:
+    for label, target, page_name in stock_nav_items:
+        lock = " 🔒" if (not premium and page_name in premium_pages) else ""
+        if st.button(label + lock, key=f"nav_{target}", use_container_width=True):
+            st.switch_page(target)
+
+    st.caption("🧾 基金投资")
+    fund_nav_items = [
+        ("💼 基金中心", "pages/11_Fund_Center.py", "基金中心"),
+    ]
+    for label, target, page_name in fund_nav_items:
         lock = " 🔒" if (not premium and page_name in premium_pages) else ""
         if st.button(label + lock, key=f"nav_{target}", use_container_width=True):
             st.switch_page(target)
