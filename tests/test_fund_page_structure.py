@@ -12,10 +12,15 @@ def test_fund_center_is_a_standalone_frontend_page():
 
     assert page.exists()
     assert "基金中心" in text
+    assert "fund-hero" in text
+    assert "FUND RESEARCH CONSOLE" in text
     assert "基金筛选" in text
     assert "基金详情" in text
     assert "基金组合" in text
     assert "基金模拟舱" in text
+    assert "一键筛选基金" in text
+    assert "场内 ETF/LOF" in text
+    assert "场外开放式" in text
     assert "股票模拟盘" in text
 
 
