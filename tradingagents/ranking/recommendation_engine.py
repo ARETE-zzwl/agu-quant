@@ -51,6 +51,97 @@ def _strategy_rows(ranked: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
+def run_paper_trade_quick_select(
+    *,
+    strategy_key: str = "paper_signal_opt",
+    universe_size: int = 60,
+    recommend_n: int = 8,
+    min_entry_score: float | None = None,
+    entry_actions: set[str] | None = None,
+    end_date: str | None = None,
+) -> dict[str, Any]:
+    """Fast one-click stock selection for the paper-trade page.
+
+    Unlike run_one_click_recommendation, this does not re-backtest all strategy
+    presets. It applies the selected strategy to a liquid universe, then confirms
+    candidates with the same signal engine used by paper-trade positions.
+    """
+    end_date = end_date or datetime.now().strftime("%Y-%m-%d")
+    catalog = ScoringEngine.get_strategies()
+    cfg = catalog.get(strategy_key, catalog.get("paper_signal_opt", catalog["balanced"]))
+    strategy_key = strategy_key if strategy_key in catalog else "paper_signal_opt"
+    min_entry_score = float(min_entry_score if min_entry_score is not None else cfg.get("paper_min_entry_score", 75))
+    entry_actions = entry_actions or set(cfg.get("paper_entry_actions", ["BUY"]))
+
+    universe = get_liquid_universe(universe_size)
+    if len(universe) < 2:
+        raise ValueError("当前可用股票池不足，无法一键选股")
+
+    engine = ScoringEngine(strategy=strategy_key)
+    scored = engine.score_all([dict(s) for s in universe])
+    current_candidates = scored[: min(len(scored), max(recommend_n * 5, 25))]
+    action_bonus = {"BUY": 12, "WATCH": 4, "NEUTRAL": -2, "AVOID": -20}
+    rows: list[dict[str, Any]] = []
+
+    for stock in current_candidates:
+        signal = evaluate_code_signal(
+            stock["code"],
+            end_date,
+            strategy_key=strategy_key,
+            quote=stock,
+            cross_score=stock.get("_score", 50),
+        )
+        action = signal.get("action", "NEUTRAL")
+        risk = signal.get("risk_level", "未知")
+        levels = signal.get("levels", {})
+        final_score = round(
+            stock.get("_score", 0) * 0.50
+            + signal.get("score", 50) * 0.50
+            + action_bonus.get(action, 0),
+            1,
+        )
+        row = {
+            "代码": stock["code"],
+            "名称": stock.get("name", ""),
+            "操作": signal.get("action_cn", "中性"),
+            "动作Key": action,
+            "综合分": final_score,
+            "选股分": stock.get("_score", 0),
+            "信号分": signal.get("score", 0),
+            "置信度": signal.get("confidence", 0),
+            "风险": risk,
+            "现价": stock.get("price", 0),
+            "涨跌幅%": stock.get("change_pct", 0),
+            "换手%": stock.get("turnover", 0),
+            "PE": stock.get("pe", 0),
+            "PB": stock.get("pb", 0),
+            "止损": levels.get("stop_loss", ""),
+            "止盈": levels.get("take_profit", ""),
+            "补仓观察": levels.get("add_price", ""),
+            "理由": "；".join(signal.get("reasons", [])[:3]),
+            "风险提示": "；".join(signal.get("risk_notes", [])[:2]),
+        }
+        if (
+            action in entry_actions
+            and risk != "高"
+            and signal.get("score", 0) >= min_entry_score
+            and stock.get("change_pct", 0) < 8
+        ):
+            rows.append(row)
+
+    rows.sort(key=lambda r: (r["综合分"], r["信号分"], r["置信度"]), reverse=True)
+    return {
+        "date": end_date,
+        "strategy_key": strategy_key,
+        "strategy_label": cfg.get("label", strategy_key),
+        "strategy_desc": cfg.get("desc", ""),
+        "universe_size": len(universe),
+        "entry_actions": sorted(entry_actions),
+        "min_entry_score": min_entry_score,
+        "recommendations": rows[:recommend_n],
+    }
+
+
 def run_one_click_recommendation(
     *,
     universe_size: int = 60,

@@ -45,6 +45,7 @@ strategy_idx = c5.selectbox("评估策略", range(len(strategy_keys)),
                             index=list(strategy_keys).index("reversal_boll_mom")
                             if "reversal_boll_mom" in strategy_keys else 0)
 selected_strategy = strategy_keys[strategy_idx]
+st.link_button("查看策略说明", "/10_Strategy_Guide")
 
 end_date = datetime.now().strftime("%Y-%m-%d")
 factor_days = _FACTOR_WINDOWS[fw]
@@ -102,6 +103,16 @@ def compute_factors_multi_window(code, end, strategy_key, factor_window_days):
         "技术形态": weights.get("momentum", 0.2),
         "复合联动": weights.get("value_quality", 0.2),
     }
+    cat_weight["GTJA Alpha191"] = max(
+        weights.get("momentum", 0.2),
+        weights.get("money_flow", 0.2),
+        weights.get("sentiment", 0.2),
+    )
+    cat_weight["Advanced Quant"] = max(
+        weights.get("momentum", 0.2),
+        weights.get("money_flow", 0.2),
+        weights.get("size", 0.2),
+    )
 
     # Cutoff: only consider data within factor_window_days of the end date
     cutoff = df.index[-1] - pd.Timedelta(days=factor_window_days)

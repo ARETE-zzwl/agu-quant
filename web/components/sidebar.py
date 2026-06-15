@@ -85,6 +85,7 @@ def render_sidebar():
         ("📊 板块分析", "pages/2_Sector_Board.py", "板块分析"),
         ("🔍 一键选股", "pages/3_Stock_Screener.py", "一键选股"),
         ("🧠 AI 荐股", "pages/4_AI_Picks.py", "AI 荐股"),
+        ("📚 策略库", "pages/10_Strategy_Guide.py", "策略库"),
         ("⚙️ 因子引擎", "pages/5_Factor_Engine.py", "因子引擎"),
         ("📡 股票监控", "pages/6_Stock_Monitor.py", "股票监控"),
         ("💰 模拟盘", "pages/7_Paper_Trade.py", "模拟盘"),

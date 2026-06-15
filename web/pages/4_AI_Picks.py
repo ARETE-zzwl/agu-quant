@@ -129,6 +129,7 @@ if mode == MODE_PRESET:
     selected_strategy = keys[si]
     top_n = c2.selectbox("推荐数量", [10, 15, 20, 30], index=1)
     go = c3.button("🚀 开始扫描", type="primary", use_container_width=True)
+    st.link_button("查看策略说明", "/10_Strategy_Guide")
 
     strategy_weights = strategy_catalog[selected_strategy]["weights"]
     strategy_filters = strategy_catalog[selected_strategy].get("filters", {})

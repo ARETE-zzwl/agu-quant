@@ -11,6 +11,16 @@ from __future__ import annotations
 
 import math
 
+SCORE_KEYS = ["value_quality", "momentum", "money_flow", "sentiment", "size"]
+
+WEIGHT_LABELS = {
+    "value_quality": "价值质量",
+    "momentum": "动量趋势",
+    "money_flow": "资金流向",
+    "sentiment": "情绪/反转",
+    "size": "规模/低波",
+}
+
 # Strategy catalog — each has:
 #   label, description, filters (pre-screen), weights (5-factor)
 
@@ -109,6 +119,238 @@ STRATEGIES = {
         "filters": {},
         "weights": {"value_quality": 0.15, "momentum": 0.30, "money_flow": 0.15, "sentiment": 0.30, "size": 0.10},
     },
+    "backtest_value_size_alpha": {
+        "label": "价值低波Alpha [近一年优选]",
+        "desc": "价值质量 + 规模低波双核心，降低情绪噪声；在2025-06-14~2026-06-14默认池回测总收益48.5%",
+        "filters": {"pe_max": 35, "pb_max": 4},
+        "weights": {"value_quality": 0.45, "momentum": 0.00, "money_flow": 0.10, "sentiment": 0.00, "size": 0.45},
+        "family": "回测优选",
+        "risk_level": "中",
+        "holding_period": "10-20个交易日",
+        "best_for": "震荡或结构性行情中寻找低波动、高性价比标的",
+    },
+    "paper_signal_opt": {
+        "label": "模拟舱稳健增强 [默认]",
+        "desc": "面向模拟舱的一键选股与持仓管理：价值低波为底，高分观察股允许入池；默认池3年模拟舱回测总收益33.8%",
+        "filters": {"pe_max": 35, "pb_max": 4},
+        "weights": {"value_quality": 0.45, "momentum": 0.00, "money_flow": 0.10, "sentiment": 0.00, "size": 0.45},
+        "family": "模拟舱",
+        "risk_level": "中",
+        "holding_period": "5-20个交易日",
+        "best_for": "想一键选股后放入模拟舱观察，并在持仓过程中按信号加减仓的用户",
+        "paper_entry_actions": ["BUY", "WATCH"],
+        "paper_min_entry_score": 65,
+        "backtest_note": "2023-06-15~2026-06-14默认15股池，BUY/WATCH且信号分>=65入场，总收益33.79%，年化10.66%，最大回撤12.00%。",
+        "implementation": "使用价值质量和规模低波作为主要选股分，少量资金流确认；空仓时允许高分观察股进入模拟舱，持仓后继续使用统一信号引擎执行加仓、止盈、止损和平仓提示。",
+    },
+    "flow_value_rotation": {
+        "label": "资金价值轮动 [高收益]",
+        "desc": "主攻资金流，辅以价值和规模过滤；在2025-06-14~2026-06-14默认池回测总收益53.3%",
+        "filters": {"turnover_min": 1},
+        "weights": {"value_quality": 0.15, "momentum": 0.05, "money_flow": 0.55, "sentiment": 0.00, "size": 0.25},
+        "family": "资金流",
+        "risk_level": "中高",
+        "holding_period": "5-15个交易日",
+        "best_for": "资金流持续改善、成交活跃但未明显过热的股票池",
+    },
+    "flow_trend_confirm": {
+        "label": "资金趋势确认",
+        "desc": "资金流和动量共同确认，减少单纯追涨；适合趋势延续阶段",
+        "filters": {"turnover_min": 1, "change_min": 0},
+        "weights": {"value_quality": 0.15, "momentum": 0.30, "money_flow": 0.35, "sentiment": 0.00, "size": 0.20},
+        "family": "资金流",
+        "risk_level": "中高",
+        "holding_period": "5-10个交易日",
+        "best_for": "量价同步向上、主力资金净流入的趋势股",
+    },
+    "defensive_value_size": {
+        "label": "防守价值低波",
+        "desc": "价值质量和规模低波为主，牺牲弹性换取回撤控制；默认池近一年最大回撤约6.7%",
+        "filters": {"pe_max": 30, "pb_max": 3},
+        "weights": {"value_quality": 0.45, "momentum": 0.00, "money_flow": 0.00, "sentiment": 0.05, "size": 0.50},
+        "family": "防守",
+        "risk_level": "低中",
+        "holding_period": "20-60个交易日",
+        "best_for": "市场波动加大、需要降低组合回撤时",
+    },
+    "capital_lowvol_barbell": {
+        "label": "资金低波杠铃",
+        "desc": "一端抓资金流，一端压低波动，减少纯题材策略的回撤风险",
+        "filters": {"turnover_min": 1},
+        "weights": {"value_quality": 0.15, "momentum": 0.05, "money_flow": 0.35, "sentiment": 0.00, "size": 0.45},
+        "family": "资金流",
+        "risk_level": "中",
+        "holding_period": "10-20个交易日",
+        "best_for": "资金偏强但市场整体风险偏高的阶段",
+    },
+    "volume_breakout_confirm": {
+        "label": "放量突破确认",
+        "desc": "动量和资金流双高，保留少量情绪确认；进攻性强，需配合止损",
+        "filters": {"change_min": 1, "turnover_min": 3},
+        "weights": {"value_quality": 0.05, "momentum": 0.35, "money_flow": 0.40, "sentiment": 0.10, "size": 0.10},
+        "family": "动量",
+        "risk_level": "高",
+        "holding_period": "3-10个交易日",
+        "best_for": "放量突破、热点扩散、短线风险预算充足时",
+    },
+    "quality_flow_compound": {
+        "label": "质量资金复合",
+        "desc": "价值质量与资金流均衡，保留一定动量，适合做中性增强基线",
+        "filters": {"pe_max": 40, "turnover_min": 1},
+        "weights": {"value_quality": 0.30, "momentum": 0.15, "money_flow": 0.40, "sentiment": 0.00, "size": 0.15},
+        "family": "均衡增强",
+        "risk_level": "中",
+        "holding_period": "10-30个交易日",
+        "best_for": "想在默认均衡策略上提高收益弹性，但不追极端动量时",
+    },
+    "lowvol_core_satellite": {
+        "label": "低波核心卫星",
+        "desc": "规模低波作为核心，少量资金流和动量做增强",
+        "filters": {"pe_max": 45},
+        "weights": {"value_quality": 0.20, "momentum": 0.05, "money_flow": 0.05, "sentiment": 0.05, "size": 0.65},
+        "family": "防守",
+        "risk_level": "低中",
+        "holding_period": "20-60个交易日",
+        "best_for": "偏稳健用户、组合底仓或弱市防守",
+    },
+    "oversold_flow_rebound": {
+        "label": "超跌资金反弹",
+        "desc": "资金流 + 情绪反转为主，用价值质量过滤纯弱股",
+        "filters": {},
+        "weights": {"value_quality": 0.15, "momentum": 0.05, "money_flow": 0.45, "sentiment": 0.25, "size": 0.10},
+        "family": "反转",
+        "risk_level": "高",
+        "holding_period": "3-10个交易日",
+        "best_for": "急跌后出现资金回流、但还没有形成拥挤追涨时",
+    },
+    "growth_flow_trend": {
+        "label": "成长资金趋势",
+        "desc": "动量、资金流、质量三者均衡，面向成长股趋势修复",
+        "filters": {"roe_min": 8, "turnover_min": 1},
+        "weights": {"value_quality": 0.20, "momentum": 0.30, "money_flow": 0.35, "sentiment": 0.05, "size": 0.10},
+        "family": "成长",
+        "risk_level": "中高",
+        "holding_period": "5-20个交易日",
+        "best_for": "成长板块回暖、成交放大且趋势开始修复时",
+    },
+    "balanced_plus": {
+        "label": "综合均衡增强",
+        "desc": "基于默认均衡的一年候选调权：提高价值质量和资金流，降低情绪噪声",
+        "filters": {},
+        "weights": {"value_quality": 0.304348, "momentum": 0.130435, "money_flow": 0.304348, "sentiment": 0.086957, "size": 0.173913},
+        "family": "均衡增强",
+        "risk_level": "中",
+        "holding_period": "10-20个交易日",
+        "best_for": "默认策略的增强替代，适合先做全市场筛选再人工确认",
+    },
+    "alpha191_balanced": {
+        "label": "Alpha191 价量均衡",
+        "desc": "参考GTJA Alpha191短周期价量思路，均衡配置动量、资金流、反转和低波维度",
+        "filters": {"turnover_min": 1},
+        "weights": {"value_quality": 0.10, "momentum": 0.30, "money_flow": 0.30, "sentiment": 0.20, "size": 0.10},
+        "factor_map": "alpha191_style",
+        "family": "Alpha191",
+        "risk_level": "中高",
+        "holding_period": "3-10个交易日",
+        "best_for": "希望用短周期价量因子捕捉交易型机会的用户",
+        "implementation": "使用GTJA Alpha191风格因子子集作为因子库补充，选股权重偏向动量、资金流和情绪反转；个股层面继续叠加K线趋势、量价、涨跌停和波动风控。",
+    },
+    "alpha191_momentum_reversal": {
+        "label": "Alpha191 动量反转",
+        "desc": "突出日内位置、五日反转、VWAP偏离和成交量冲击，适合短线均值回归",
+        "filters": {"turnover_min": 2},
+        "weights": {"value_quality": 0.05, "momentum": 0.35, "money_flow": 0.20, "sentiment": 0.35, "size": 0.05},
+        "factor_map": "alpha191_style",
+        "family": "Alpha191",
+        "risk_level": "高",
+        "holding_period": "1-5个交易日",
+        "best_for": "高换手、短线反转、热点回落后的二次确认场景",
+        "implementation": "偏重Alpha191风格的收盘位置变化、五日反转、VWAP偏离和量价冲击；适合观察，不建议脱离止损直接实盘执行。",
+    },
+    "alpha191_flow_volatility": {
+        "label": "Alpha191 资金波动",
+        "desc": "将Alpha191价量失衡与低波控制组合，强调资金流和波动收缩后的扩散",
+        "filters": {"turnover_min": 1},
+        "weights": {"value_quality": 0.10, "momentum": 0.20, "money_flow": 0.40, "sentiment": 0.10, "size": 0.20},
+        "factor_map": "alpha191_style",
+        "family": "Alpha191",
+        "risk_level": "中高",
+        "holding_period": "5-15个交易日",
+        "best_for": "成交活跃、资金失衡明显，同时希望控制波动回撤的股票池",
+        "implementation": "使用Alpha191风格的量价相关、资金流失衡、波动收缩因子作为信号来源；五维评分上提高资金流和低波/规模权重。",
+    },
+    "alpha191_momentum_core": {
+        "label": "Alpha191 动量核心 [回测优选]",
+        "desc": "Alpha191子集在默认池近一年表现较好的调权方案：动量80% + 低波20%",
+        "filters": {"turnover_min": 1},
+        "weights": {"value_quality": 0.00, "momentum": 0.80, "money_flow": 0.00, "sentiment": 0.00, "size": 0.20},
+        "factor_map": "alpha191_style",
+        "family": "Alpha191",
+        "risk_level": "中高",
+        "holding_period": "3-10个交易日",
+        "best_for": "短周期价量趋势更清晰、市场有连续性时，用作Alpha191子集的优选版本",
+        "implementation": "使用GTJA Alpha191风格因子映射，并把组合权重集中在动量类Alpha191因子，少量低波维度用于控制过度追涨。",
+    },
+    "alpha191_flow_lowvol_opt": {
+        "label": "Alpha191 低波容量增强 [回测优选]",
+        "desc": "Alpha191 190因子池权重搜索优选：价值20% + 资金流10% + 低波70%，默认池近一年总收益约34.3%",
+        "filters": {"turnover_min": 1},
+        "weights": {"value_quality": 0.20, "momentum": 0.00, "money_flow": 0.10, "sentiment": 0.00, "size": 0.70},
+        "factor_map": "alpha191_style",
+        "family": "Alpha191",
+        "risk_level": "中",
+        "holding_period": "10-30个交易日",
+        "best_for": "Alpha191 190因子池里希望先控制回撤和因子稀释风险的用户，适合波动收敛、成交容量稳定的股票池",
+        "implementation": "使用完整Alpha191可计算因子池，权重主要压在低波/规模代理维度，少量价值和资金流用于确认容量与价格支撑；相比30因子精选池更分散，但收益弹性也会被稀释。",
+    },
+    "advanced_vol_momentum": {
+        "label": "前沿 波动目标动量",
+        "desc": "参考volatility-managed momentum与残差动量：用中期趋势除以实现波动率，偏好稳定趋势",
+        "filters": {"turnover_min": 1},
+        "weights": {"value_quality": 0.05, "momentum": 0.55, "money_flow": 0.15, "sentiment": 0.05, "size": 0.20},
+        "factor_map": "advanced_quant",
+        "family": "Advanced Quant",
+        "risk_level": "中高",
+        "holding_period": "5-20个交易日",
+        "best_for": "趋势连续但波动没有明显失控的行情，用作更稳健的动量增强方案",
+        "implementation": "使用Advanced Quant因子映射：动量维度由波动目标动量、趋势一致性和残差动量组成，规模/低波维度由波动稳定性和Amihud流动性控制冲击成本。",
+    },
+    "advanced_liquidity_reversal": {
+        "label": "前沿 流动性冲击反转",
+        "desc": "参考流动性冲击与短期反转研究：寻找高成交急跌后的修复机会",
+        "filters": {"turnover_min": 2},
+        "weights": {"value_quality": 0.05, "momentum": 0.15, "money_flow": 0.35, "sentiment": 0.30, "size": 0.15},
+        "factor_map": "advanced_quant",
+        "family": "Advanced Quant",
+        "risk_level": "高",
+        "holding_period": "1-10个交易日",
+        "best_for": "短线急跌、成交放大、但流动性仍足够的股票池，必须配合止损和仓位控制",
+        "implementation": "核心信号是流动性冲击反转与日内反转，叠加Amihud非流动性和波动稳定性过滤，避免选择冲击成本过高的弱流动标的。",
+    },
+    "advanced_lowvol_quality": {
+        "label": "前沿 低波质量增强",
+        "desc": "结合低波异象、Amihud流动性和质量低风险代理，偏防守但保留趋势确认",
+        "filters": {"pe_max": 45},
+        "weights": {"value_quality": 0.35, "momentum": 0.15, "money_flow": 0.10, "sentiment": 0.00, "size": 0.40},
+        "factor_map": "advanced_quant",
+        "family": "Advanced Quant",
+        "risk_level": "低中",
+        "holding_period": "10-40个交易日",
+        "best_for": "震荡或风险偏好下降阶段，想降低回撤但保留一部分趋势暴露的用户",
+        "implementation": "用波动稳定性、Amihud流动性和低风险质量作为主筛选，少量残差动量和趋势一致性用于避免长期弱势股。",
+    },
+    "advanced_stable_momentum_opt": {
+        "label": "前沿 稳定动量增强 [回测优选]",
+        "desc": "Advanced Quant因子权重搜索优选：低风险质量40% + 波动目标动量50% + 反转10%",
+        "filters": {"turnover_min": 1},
+        "weights": {"value_quality": 0.40, "momentum": 0.50, "money_flow": 0.00, "sentiment": 0.10, "size": 0.00},
+        "factor_map": "advanced_quant",
+        "family": "Advanced Quant",
+        "risk_level": "中高",
+        "holding_period": "5-20个交易日",
+        "best_for": "想尝试更前沿价量/风险因子，但仍希望用低风险质量约束动量暴露的用户",
+        "implementation": "使用波动目标动量、趋势一致性、残差动量识别趋势，配合波动稳定性、Amihud流动性和短线反转过滤高冲击成本标的。",
+    },
     "balanced": {
         "label": "综合均衡",
         "desc": "五因子等权 + 无预设偏差 → 适合作为基准组合",
@@ -129,6 +371,82 @@ def _strategy_catalog() -> dict:
     except Exception:
         pass
     return catalog
+
+
+def _normalize_weights(weights: dict | None) -> dict[str, float]:
+    weights = weights or {}
+    cleaned = {k: max(0.0, float(weights.get(k, 0) or 0)) for k in SCORE_KEYS}
+    total = sum(cleaned.values())
+    if total <= 0:
+        return {k: 1 / len(SCORE_KEYS) for k in SCORE_KEYS}
+    normalized = {}
+    running = 0.0
+    for key in SCORE_KEYS[:-1]:
+        normalized[key] = round(cleaned[key] / total, 6)
+        running += normalized[key]
+    normalized[SCORE_KEYS[-1]] = round(1.0 - running, 6)
+    return normalized
+
+
+def _infer_family(key: str, cfg: dict) -> str:
+    if cfg.get("family"):
+        return cfg["family"]
+    if key.startswith("opt_"):
+        return "回测调权"
+    if "value" in key or "dividend" in key:
+        return "价值"
+    if "growth" in key or "garp" in key:
+        return "成长"
+    if "flow" in key or "money" in key or "northbound" in key:
+        return "资金流"
+    if "breakout" in key or "momentum" in key or "limitup" in key:
+        return "动量"
+    if "reversal" in key or "boll" in key or "pullback" in key:
+        return "反转"
+    return "综合"
+
+
+def _infer_risk(weights: dict[str, float], cfg: dict) -> str:
+    if cfg.get("risk_level"):
+        return cfg["risk_level"]
+    aggressive = weights["momentum"] + weights["sentiment"]
+    defensive = weights["value_quality"] + weights["size"]
+    if aggressive >= 0.55:
+        return "高"
+    if defensive >= 0.65 and aggressive <= 0.2:
+        return "低中"
+    return "中"
+
+
+def _strategy_detail(key: str, cfg: dict) -> dict:
+    weights = _normalize_weights(cfg.get("weights"))
+    top_dims = sorted(weights, key=weights.get, reverse=True)[:2]
+    filters = cfg.get("filters", {}) or {}
+    if filters:
+        filter_text = "；".join(f"{k}={v}" for k, v in filters.items())
+    else:
+        filter_text = "无硬性预筛选，主要依赖横截面评分和交易信号二次确认"
+    implementation = cfg.get("implementation") or (
+        f"先按预筛选条件取股票池，再计算五因子横截面百分位；"
+        f"权重最高的维度是{WEIGHT_LABELS[top_dims[0]]}和{WEIGHT_LABELS[top_dims[1]]}。"
+        f"最终在AI荐股和股票监控中叠加K线趋势、资金/因子投票、涨跌停与波动风险。"
+    )
+    return {
+        "key": key,
+        "label": cfg.get("label", key),
+        "desc": cfg.get("desc", ""),
+        "family": _infer_family(key, cfg),
+        "risk_level": _infer_risk(weights, cfg),
+        "holding_period": cfg.get("holding_period", "5-20个交易日"),
+        "best_for": cfg.get("best_for", "作为候选股票池筛选策略，需结合个股信号和风险提示确认"),
+        "filters": filters,
+        "weights": weights,
+        "implementation": implementation,
+        "backtest_note": cfg.get(
+            "backtest_note",
+            "历史收益来自当前回测引擎和样本区间，只能用于研究比较，不能视为未来收益承诺。",
+        ),
+    }
 
 
 class ScoringEngine:
@@ -257,3 +575,15 @@ class ScoringEngine:
     def get_presets(cls) -> list[dict]:
         """Return strategies as a flat list for UI display."""
         return [{"key": k, **v} for k, v in _strategy_catalog().items()]
+
+    @classmethod
+    def get_strategy_details(cls) -> list[dict]:
+        """Return page-ready strategy metadata with normalized weights."""
+        return [_strategy_detail(k, v) for k, v in _strategy_catalog().items()]
+
+    @classmethod
+    def get_strategy_detail(cls, key: str) -> dict:
+        """Return one strategy detail; fallback to balanced for unknown keys."""
+        catalog = _strategy_catalog()
+        selected = key if key in catalog else "balanced"
+        return _strategy_detail(selected, catalog[selected])

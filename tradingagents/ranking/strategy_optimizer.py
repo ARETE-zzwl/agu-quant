@@ -33,6 +33,38 @@ DEFAULT_CATEGORY_FACTORS = {
     "size": ["price_stability", "idio_vol", "max_drawdown_1y", "low_risk_quality"],
 }
 
+ALPHA191_ALL_FACTORS = [f"gtja_alpha{i:03d}" for i in range(1, 192) if i != 30]
+ALPHA191_CATEGORY_FACTORS = {
+    "value_quality": [f for idx, f in enumerate(ALPHA191_ALL_FACTORS) if idx % 5 == 0]
+    + ["gtja_alpha046", "gtja_alpha126", "gtja_alpha191"],
+    "momentum": [f for idx, f in enumerate(ALPHA191_ALL_FACTORS) if idx % 5 == 1]
+    + ["gtja_alpha018", "gtja_alpha020", "gtja_alpha024", "gtja_alpha029", "gtja_alpha088"],
+    "money_flow": [f for idx, f in enumerate(ALPHA191_ALL_FACTORS) if idx % 5 == 2]
+    + ["gtja_alpha001", "gtja_alpha016", "gtja_alpha094", "gtja_alpha128", "gtja_alpha132", "gtja_alpha150"],
+    "sentiment": [f for idx, f in enumerate(ALPHA191_ALL_FACTORS) if idx % 5 == 3]
+    + ["gtja_alpha002", "gtja_alpha014", "gtja_alpha015", "gtja_alpha054", "gtja_alpha057"],
+    "size": [f for idx, f in enumerate(ALPHA191_ALL_FACTORS) if idx % 5 == 4]
+    + ["gtja_alpha041", "gtja_alpha101", "gtja_alpha115", "gtja_alpha172"],
+}
+ALPHA191_CATEGORY_FACTORS = {
+    key: list(dict.fromkeys(factors))
+    for key, factors in ALPHA191_CATEGORY_FACTORS.items()
+}
+
+ADVANCED_QUANT_CATEGORY_FACTORS = {
+    "value_quality": ["adv_vol_stability", "adv_amihud_liquidity", "low_risk_quality"],
+    "momentum": ["adv_vol_target_momentum", "adv_trend_consistency", "adv_residual_momentum"],
+    "money_flow": ["adv_liquidity_shock_reversal", "adv_amihud_liquidity", "smart_money_index"],
+    "sentiment": ["adv_liquidity_shock_reversal", "intraday_reversal", "reversal_risk"],
+    "size": ["adv_vol_stability", "adv_amihud_liquidity", "price_stability"],
+}
+
+FACTOR_MAP_PRESETS = {
+    "default": DEFAULT_CATEGORY_FACTORS,
+    "alpha191_style": ALPHA191_CATEGORY_FACTORS,
+    "advanced_quant": ADVANCED_QUANT_CATEGORY_FACTORS,
+}
+
 OPTIMIZED_FILE = Path.home() / ".tradingagents" / "optimized_strategies.json"
 
 
@@ -44,6 +76,15 @@ def normalize_strategy_weights(weights: dict[str, float] | None) -> dict[str, fl
     if total <= 0:
         return {k: 1 / len(SCORE_KEYS) for k in SCORE_KEYS}
     return {k: round(cleaned[k] / total, 6) for k in SCORE_KEYS}
+
+
+def get_strategy_factor_map(strategy_cfg: dict | None) -> dict[str, list[str]]:
+    """Return the factor map requested by a strategy config."""
+    cfg = strategy_cfg or {}
+    factor_map = cfg.get("factor_map", "default")
+    if isinstance(factor_map, dict):
+        return factor_map
+    return FACTOR_MAP_PRESETS.get(str(factor_map), DEFAULT_CATEGORY_FACTORS)
 
 
 def objective_score(metrics: dict[str, float]) -> float:
@@ -364,20 +405,44 @@ def compare_strategy_presets(
         selected = {k: catalog[k] for k in strategy_keys if k in catalog}
     else:
         selected = {k: v for k, v in catalog.items() if k != "custom"}
-    prepared = prepare_strategy_backtest(codes, start_date, end_date, rebalance_days=rebalance_days)
-    ranked = compare_prepared_strategies(
-        prepared,
-        selected,
-        top_pct=top_pct,
-        rebalance_days=rebalance_days,
-        max_positions=max_positions,
-        cost_rate=cost_rate,
-    )
+    grouped: dict[str, dict[str, dict]] = {}
+    for key, cfg in selected.items():
+        map_key = cfg.get("factor_map", "default")
+        if not isinstance(map_key, str):
+            map_key = f"custom_{id(map_key)}"
+        grouped.setdefault(map_key, {})[key] = cfg
+
+    ranked: list[dict[str, Any]] = []
+    prepared_meta: dict[str, Any] = {"codes": [], "factor_maps": []}
+    for map_key, strategy_group in grouped.items():
+        factor_map = get_strategy_factor_map(next(iter(strategy_group.values())))
+        prepared = prepare_strategy_backtest(
+            codes,
+            start_date,
+            end_date,
+            factor_map=factor_map,
+            rebalance_days=rebalance_days,
+        )
+        group_rows = compare_prepared_strategies(
+            prepared,
+            strategy_group,
+            top_pct=top_pct,
+            rebalance_days=rebalance_days,
+            max_positions=max_positions,
+            cost_rate=cost_rate,
+        )
+        for row in group_rows:
+            row["factor_map"] = map_key
+        ranked.extend(group_rows)
+        prepared_meta["codes"] = prepared_meta["codes"] or prepared.get("codes", [])
+        prepared_meta["factor_maps"].append(map_key)
+    ranked.sort(key=lambda r: r["metrics"]["objective_score"], reverse=True)
     return {
         "ranked": ranked,
         "best": ranked[0] if ranked else None,
         "prepared_meta": {
-            "codes": prepared.get("codes", []),
+            "codes": prepared_meta.get("codes", []),
+            "factor_maps": prepared_meta.get("factor_maps", []),
             "start_date": start_date,
             "end_date": end_date,
         },

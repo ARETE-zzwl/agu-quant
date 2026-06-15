@@ -11,6 +11,7 @@ load_dotenv()
 from web.components.common import inject_css
 from tradingagents.ranking.scoring_engine import ScoringEngine
 from tradingagents.ranking.signal_engine import evaluate_code_signal
+from tradingagents.ranking.recommendation_engine import run_paper_trade_quick_select
 from tradingagents.paper_trade import get_account, is_trading_time
 
 st.set_page_config(page_title="模拟盘", page_icon="💰", layout="wide", initial_sidebar_state="expanded")
@@ -41,6 +42,30 @@ def load_position_signal(code, end_date, strategy_key, price, avg_cost, shares, 
         quote={"code": code, "price": price},
         position={"avg_cost": avg_cost, "shares": shares, "sellable": sellable},
     )
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_quick_picks(strategy_key, universe_size, recommend_n, min_entry_score):
+    return run_paper_trade_quick_select(
+        strategy_key=strategy_key,
+        universe_size=universe_size,
+        recommend_n=recommend_n,
+        min_entry_score=min_entry_score,
+    )
+
+
+def _action_plan(sig: dict, position: dict) -> str:
+    action = sig.get("action", "HOLD")
+    sellable = int(position.get("sellable", 0) or 0)
+    if action in {"STOP_LOSS", "EXIT"}:
+        return f"优先处理风险；若可卖数量为{sellable}股，模拟舱建议按平仓处理。"
+    if action in {"TAKE_PROFIT", "REDUCE"}:
+        qty = max(0, sellable // 2 // 100 * 100)
+        return f"建议先减半仓位，参考数量约{qty}股；剩余仓位继续用止损/止盈位跟踪。"
+    if action == "ADD":
+        levels = sig.get("levels", {})
+        return f"允许小额加仓，不追高；参考补仓观察价 {levels.get('add_price', '—')}，单次不超过目标仓位的一半。"
+    return "暂无主动交易动作；继续持有并观察趋势、风险提示和止损位。"
 
 
 def _render_quote_panel(code: str):
@@ -157,6 +182,7 @@ if prefill:
     st.session_state["trd_code"] = prefill.get("code", "")
     st.session_state["trd_action"] = prefill.get("action", "买入")
     st.session_state["trd_qty"] = prefill.get("qty", 100)
+    st.session_state["trd_amt"] = prefill.get("amount", 0)
 
 st.markdown(
     '<div style="margin-bottom:0.5rem;">'
@@ -189,14 +215,123 @@ elif market_kind == "info":
 else:
     st.warning("当前休市或已收盘，下单会按规则被拒绝")
 
-tab_pos, tab_trade, tab_orders, tab_rules = st.tabs(["持仓信号", "下单交易", "资产委托", "规则管理"])
+tab_pick, tab_pos, tab_trade, tab_orders, tab_rules = st.tabs([
+    "一键选股", "持仓信号", "下单交易", "资产委托", "规则管理"
+])
+
+with tab_pick:
+    st.markdown("### 一键选股进模拟舱")
+    st.caption("默认使用模拟舱稳健增强策略：先按流动性和策略分筛选，再用持仓同源信号确认入场。")
+
+    presets = ScoringEngine.get_presets()
+    strategy_keys = [p["key"] for p in presets]
+    strategy_labels = {p["key"]: p["label"] for p in presets}
+    default_pick_key = "paper_signal_opt" if "paper_signal_opt" in strategy_keys else "backtest_value_size_alpha"
+    default_pick_idx = strategy_keys.index(default_pick_key) if default_pick_key in strategy_keys else 0
+    strategy_catalog = ScoringEngine.get_strategies()
+
+    p1, p2, p3, p4 = st.columns([1.4, 0.8, 0.8, 0.8])
+    pick_strategy_idx = p1.selectbox(
+        "选股策略",
+        range(len(strategy_keys)),
+        format_func=lambda i: strategy_labels[strategy_keys[i]],
+        index=default_pick_idx,
+        key="paper_pick_strategy_idx",
+    )
+    pick_strategy = strategy_keys[pick_strategy_idx]
+    cfg = strategy_catalog.get(pick_strategy, strategy_catalog.get("balanced", {}))
+    default_min_score = int(cfg.get("paper_min_entry_score", 75))
+    universe_size = p2.selectbox("股票池", [40, 60, 100], index=1, format_func=lambda n: f"高流动性{n}只")
+    recommend_n = p3.selectbox("候选数", [5, 8, 10, 15], index=1)
+    min_entry_score = p4.number_input("信号门槛", min_value=50, max_value=90, value=default_min_score, step=1)
+
+    run_pick = st.button("一键选股", type="primary", width="stretch")
+    if run_pick:
+        with st.status("正在一键选股...", expanded=True) as status:
+            try:
+                st.write("筛选高流动性股票池")
+                st.write("按当前策略打分排序")
+                st.write("用模拟舱同源信号确认买入/观察动作")
+                result = load_quick_picks(pick_strategy, universe_size, recommend_n, min_entry_score)
+                st.session_state["paper_quick_picks"] = result
+                status.update(label="一键选股完成", state="complete")
+            except Exception as exc:
+                status.update(label="一键选股失败", state="error")
+                st.error(f"一键选股失败: {exc}")
+
+    quick = st.session_state.get("paper_quick_picks")
+    if quick:
+        q1, q2, q3, q4 = st.columns(4)
+        q1.metric("策略", quick["strategy_label"])
+        q2.metric("候选池", f"{quick['universe_size']}只")
+        q3.metric("入场动作", " / ".join(quick["entry_actions"]))
+        q4.metric("信号门槛", f"{quick['min_entry_score']:.0f}分")
+        st.caption(quick.get("strategy_desc", ""))
+
+        recs = quick.get("recommendations", [])
+        if recs:
+            rows = []
+            for i, r in enumerate(recs, start=1):
+                rows.append({
+                    "排名": i,
+                    "代码": r["代码"],
+                    "名称": r["名称"],
+                    "操作": r["操作"],
+                    "综合分": r["综合分"],
+                    "信号分": r["信号分"],
+                    "风险": r["风险"],
+                    "现价": r["现价"],
+                    "涨跌幅": f"{r['涨跌幅%']:+.1f}%",
+                    "换手": f"{r['换手%']:.1f}%",
+                    "止损": r["止损"],
+                    "止盈": r["止盈"],
+                    "理由": r["理由"],
+                    "风险提示": r["风险提示"],
+                })
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True, height=320)
+
+            labels = [f"{r['代码']} {r['名称']} | {r['操作']} | {r['综合分']}分" for r in recs]
+            selected_label = st.selectbox("选择候选操作", labels)
+            selected_row = recs[labels.index(selected_label)]
+            remain_slots = max(1, 10 - len(summary["positions"]))
+            suggested_amount = int(max(5_000, min(summary["cash"] * 0.95 / remain_slots, 100_000)) // 1000 * 1000)
+            b1, b2 = st.columns(2)
+            if b1.button("填入买入单", width="stretch"):
+                st.session_state["paper_trade_prefill"] = {
+                    "code": selected_row["代码"],
+                    "action": "买入",
+                    "qty": 100,
+                    "amount": suggested_amount,
+                }
+                st.rerun()
+            if b2.button("一键买入全部候选", type="primary", width="stretch"):
+                if not market_open:
+                    st.error("当前非交易时间，无法一键买入；可以先填入买入单，开盘后确认。")
+                else:
+                    buy_count = min(len(recs), remain_slots)
+                    per_amount = summary["cash"] * 0.95 / max(1, buy_count)
+                    filled, rejected = 0, []
+                    for row in recs[:buy_count]:
+                        order = acc.buy(row["代码"], amount=per_amount)
+                        if order.status == "filled":
+                            filled += 1
+                        else:
+                            rejected.append(f"{row['代码']}: {order.reason}")
+                    if filled:
+                        st.success(f"已买入 {filled} 只候选股")
+                    if rejected:
+                        st.warning("；".join(rejected[:3]))
+                    st.rerun()
+        else:
+            st.warning("当前没有满足门槛的候选股。可以扩大股票池，或把信号门槛下调到60-65之间。")
 
 with tab_pos:
     st.markdown("### 持仓与系统信号")
     signal_presets = ScoringEngine.get_presets()
     signal_keys = [p["key"] for p in signal_presets]
     signal_labels = {p["key"]: p["label"] for p in signal_presets}
-    default_signal_idx = signal_keys.index("balanced") if "balanced" in signal_keys else 0
+    default_signal_key = "paper_signal_opt" if "paper_signal_opt" in signal_keys else "balanced"
+    default_signal_idx = signal_keys.index(default_signal_key) if default_signal_key in signal_keys else 0
     signal_strategy_idx = st.selectbox(
         "持仓信号策略",
         range(len(signal_keys)),
@@ -207,6 +342,7 @@ with tab_pos:
 
     if summary["positions"]:
         rows = []
+        signal_details = []
         action_counts = {}
         end_date = datetime.now().strftime("%Y-%m-%d")
         for p in summary["positions"]:
@@ -215,6 +351,7 @@ with tab_pos:
                 p["code"], end_date, signal_strategy, p["price"], p["avg_cost"],
                 p["shares"], p["sellable"],
             )
+            signal_details.append((p, sig))
             action = sig.get("action_cn", "—")
             action_counts[action] = action_counts.get(action, 0) + 1
             levels = sig.get("levels", {})
@@ -245,6 +382,48 @@ with tab_pos:
 
         st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True, height=380)
         st.caption("🔒 表示T+1锁定；系统信号仅用于模拟盘管理和研究参考")
+
+        st.markdown("#### 具体信号策略")
+        for p, sig in signal_details:
+            action = sig.get("action_cn", "—")
+            score = sig.get("score", "—")
+            with st.expander(f"{p['code']} {p['name']} · {action} · {score}分", expanded=False):
+                levels = sig.get("levels", {})
+                tech = sig.get("technical", {})
+                d1, d2, d3, d4, d5 = st.columns(5)
+                d1.metric("持仓盈亏", f"{p['pnl_pct']:+.1f}%")
+                d2.metric("风险", sig.get("risk_level", "—"))
+                d3.metric("止损", levels.get("stop_loss", "—"))
+                d4.metric("止盈", levels.get("take_profit", "—"))
+                d5.metric("RSI", tech.get("rsi", "—"))
+                st.markdown(f"**操作策略：** {_action_plan(sig, p)}")
+                reasons = sig.get("reasons", [])
+                if reasons:
+                    st.markdown("**信号依据：** " + "；".join(reasons[:4]))
+                risk_notes = sig.get("risk_notes", [])
+                if risk_notes:
+                    st.markdown("**风险提示：** " + "；".join(risk_notes[:4]))
+                factor_summary = sig.get("factor_summary", {})
+                st.caption(
+                    f"高IC因子票数：买入 {factor_summary.get('buy', 0)} / "
+                    f"卖出 {factor_summary.get('sell', 0)} / 中性 {factor_summary.get('neutral', 0)}"
+                )
+                factor_rows = sig.get("factor_rows", [])[:8]
+                if factor_rows:
+                    st.dataframe(
+                        pd.DataFrame([
+                            {
+                                "因子": f.get("name_cn") or f.get("name"),
+                                "类别": f.get("category"),
+                                "信号": f.get("signal"),
+                                "权重": f.get("weight"),
+                                "数值": f.get("value"),
+                            }
+                            for f in factor_rows
+                        ]),
+                        width="stretch",
+                        hide_index=True,
+                    )
 
         p_codes = [f"{p['code']} {p['name']}" for p in summary["positions"]]
         pick = st.selectbox("选择持仓操作", p_codes)
