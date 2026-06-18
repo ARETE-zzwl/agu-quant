@@ -7,11 +7,28 @@ import streamlit as st
 # ── CSS Injection ───────────────────────────────────────────────────────────────
 
 _CSS = """
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap');
+
+:root {
+    --ta-bg: #0b0f12;
+    --ta-surface: #12171a;
+    --ta-surface-2: #171d21;
+    --ta-border: #263036;
+    --ta-border-strong: #3b4850;
+    --ta-text: #f4efe6;
+    --ta-muted: #9aa4ad;
+    --ta-subtle: #68737d;
+    --ta-accent: #f97316;
+    --ta-accent-2: #2dd4bf;
+    --ta-blue: #60a5fa;
+    --ta-green: #22c55e;
+    --ta-red: #ef4444;
+}
 
 #MainMenu, header[data-testid="stHeader"],
 footer, div[data-testid="stDecoration"],
 div[data-testid="stToolbar"] { display: none !important; }
+
 button[data-testid="collapsedControl"] {
     display: flex !important;
     visibility: visible !important;
@@ -20,80 +37,318 @@ button[data-testid="collapsedControl"] {
     top: 0.5rem !important;
     left: 0.5rem !important;
     z-index: 999999 !important;
-    background: #1a1a1a !important;
-    border: 1px solid #333 !important;
+    background: var(--ta-surface-2) !important;
+    border: 1px solid var(--ta-border) !important;
     border-radius: 6px !important;
     width: 32px !important;
     height: 32px !important;
 }
 
-html, body, [class*="css"] { font-family: 'Inter', -apple-system, sans-serif; }
-.stApp { background: #0c0c0c; }
-section[data-testid="stSidebar"] { background: #111; border-right: 1px solid #1e1e1e; }
+html, body, [class*="css"] {
+    font-family: 'Noto Sans SC', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    letter-spacing: 0 !important;
+}
 
-/* -- Metrics -- */
-.stMetric label { color: #888 !important; font-size: 0.75rem !important; letter-spacing: 0.02em; }
-.stMetric [data-testid="stMetricValue"] { color: #f5f1eb !important; font-weight: 600 !important; font-size: 1.4rem !important; }
+.stApp {
+    background: linear-gradient(180deg, #0b0f12 0%, #0d1113 100%);
+    color: var(--ta-text);
+}
 
-/* -- Progress -- */
+section[data-testid="stSidebar"] {
+    background: #0f1417;
+    border-right: 1px solid #202930;
+}
+
+.block-container {
+    padding-top: 1.25rem !important;
+    padding-bottom: 2rem !important;
+}
+
+/* Page primitives */
+.ta-page-header {
+    border-bottom: 1px solid var(--ta-border);
+    margin: 0 0 1rem 0;
+    padding: 0.25rem 0 1rem 0;
+    position: relative;
+    overflow: hidden;
+}
+.ta-page-header::after {
+    content: "";
+    position: absolute;
+    top: 0.25rem;
+    right: 0;
+    width: min(26rem, 42%);
+    height: 100%;
+    opacity: 0.18;
+    pointer-events: none;
+    background:
+        linear-gradient(90deg, transparent, var(--ta-bg) 92%),
+        repeating-linear-gradient(0deg, transparent 0 9px, rgba(45, 212, 191, 0.3) 9px 10px),
+        repeating-linear-gradient(90deg, rgba(249, 115, 22, 0.35) 0 1px, transparent 1px 18px);
+}
+.ta-eyebrow {
+    color: var(--ta-accent-2);
+    font-size: 0.78rem;
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+}
+.ta-page-title {
+    color: var(--ta-text);
+    font-size: 1.55rem;
+    font-weight: 800;
+    line-height: 1.25;
+    margin: 0;
+}
+.ta-page-subtitle {
+    color: var(--ta-muted);
+    font-size: 0.92rem;
+    line-height: 1.6;
+    margin-top: 0.35rem;
+}
+.ta-panel {
+    background: var(--ta-surface);
+    border: 1px solid var(--ta-border);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+.ta-panel-title {
+    color: var(--ta-text);
+    font-weight: 700;
+    font-size: 1rem;
+    margin-bottom: 0.35rem;
+}
+.ta-muted {
+    color: var(--ta-muted);
+    font-size: 0.86rem;
+    line-height: 1.55;
+}
+.ta-badge-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+.ta-badge {
+    border: 1px solid var(--ta-border);
+    border-radius: 999px;
+    color: #d7dee4;
+    background: #10171b;
+    font-size: 0.78rem;
+    padding: 0.2rem 0.55rem;
+}
+.ta-plan-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin: 0.25rem 0 1rem 0;
+}
+.ta-plan-card {
+    background: #11181c;
+    border: 1px solid var(--ta-border);
+    border-radius: 8px;
+    padding: 0.9rem;
+}
+.ta-plan-card strong {
+    color: var(--ta-text);
+    font-size: 1rem;
+}
+.ta-plan-price {
+    color: var(--ta-accent);
+    font-size: 1.35rem;
+    font-weight: 800;
+    margin: 0.25rem 0;
+}
+.ta-status-good { color: var(--ta-green); }
+.ta-status-warn { color: var(--ta-accent); }
+.ta-status-bad { color: var(--ta-red); }
+.ta-warning-strip {
+    background: #172018;
+    border: 1px solid #344829;
+    border-radius: 8px;
+    color: #edf5e7;
+    font-weight: 700;
+    padding: 0.85rem 1rem;
+    margin-bottom: 1rem;
+}
+
+@media (max-width: 760px) {
+    .ta-plan-grid { grid-template-columns: 1fr; }
+    .ta-page-header::after { display: none; }
+    .ta-page-title { font-size: 1.28rem; }
+    .block-container { padding-left: 1rem !important; padding-right: 1rem !important; }
+}
+
+/* Metrics */
+.stMetric label {
+    color: var(--ta-muted) !important;
+    font-size: 0.75rem !important;
+    letter-spacing: 0 !important;
+}
+.stMetric [data-testid="stMetricValue"] {
+    color: var(--ta-text) !important;
+    font-weight: 700 !important;
+    font-size: 1.28rem !important;
+}
+
+/* Progress */
 .stProgress > div > div > div {
-    background: linear-gradient(90deg, #f97316, #fb923c) !important;
+    background: var(--ta-accent) !important;
     border-radius: 2px !important;
 }
 
-/* -- Primary Button -- */
+/* Buttons */
 button[kind="primary"] {
-    background: linear-gradient(135deg, #f97316, #ea580c) !important; border: none !important;
-    font-weight: 600 !important; font-size: 0.85rem !important;
-    border-radius: 6px !important; transition: all 0.15s ease !important;
+    background: var(--ta-accent) !important;
+    border: 1px solid #fb923c !important;
+    color: #140b04 !important;
+    font-weight: 700 !important;
+    font-size: 0.86rem !important;
+    border-radius: 6px !important;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease !important;
 }
-button[kind="primary"]:hover { background: linear-gradient(135deg, #fb923c, #f97316) !important; }
-
-/* -- Secondary Button -- */
+button[kind="primary"]:hover {
+    background: #fb923c !important;
+    border-color: #fed7aa !important;
+    transform: translateY(-1px);
+}
 button[kind="secondary"] {
-    background: #1a1a1a !important; border: 1px solid #333 !important;
-    color: #aaa !important; border-radius: 6px !important;
-    transition: all 0.15s ease !important;
+    background: var(--ta-surface-2) !important;
+    border: 1px solid var(--ta-border) !important;
+    color: #d5dde3 !important;
+    border-radius: 6px !important;
+    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease !important;
 }
-button[kind="secondary"]:hover { border-color: #555 !important; color: #f5f1eb !important; }
-
-/* -- Expander -- */
-.stExpander { border: 1px solid #222 !important; border-radius: 6px !important; }
-
-/* -- Tabs -- */
-.stTabs [data-baseweb="tab"] { color: #666 !important; font-size: 0.85rem !important; }
-.stTabs [aria-selected="true"] { color: #f97316 !important; border-bottom-color: #f97316 !important; }
-
-/* -- Inputs -- */
-input[data-testid="stTextInputRootElement"] input, .stTextInput input {
-    background: #1a1a1a !important; border: 1px solid #2a2a2a !important;
-    color: #e5e5e5 !important; border-radius: 6px !important;
+button[kind="secondary"]:hover {
+    background: #1c2429 !important;
+    border-color: var(--ta-border-strong) !important;
+    color: var(--ta-text) !important;
 }
-.stTextInput input:focus { border-color: #f97316 !important; box-shadow: none !important; }
-.stDateInput input { background: #1a1a1a !important; border-color: #2a2a2a !important; color: #e5e5e5 !important; }
-.stSelectbox [data-baseweb="select"] { background: #1a1a1a !important; border-radius: 6px !important; }
-.stRadio [data-baseweb="radiogroup"] label { color: #999 !important; }
+button:disabled {
+    opacity: 0.45 !important;
+}
+button:focus-visible,
+.stTextInput input:focus-visible,
+.stNumberInput input:focus-visible,
+.stDateInput input:focus-visible {
+    outline: 2px solid var(--ta-accent-2) !important;
+    outline-offset: 2px !important;
+}
 
-/* -- Dataframe -- */
-.stDataFrame { font-size: 0.82rem !important; }
-.stDataFrame th { background: #161616 !important; color: #777 !important; font-weight: 600 !important; border-bottom: 1px solid #222 !important; }
-.stDataFrame td { color: #ddd !important; }
+/* Expander and tabs */
+.stExpander {
+    border: 1px solid var(--ta-border) !important;
+    border-radius: 8px !important;
+    background: #101518 !important;
+}
+.stTabs [data-baseweb="tab"] {
+    color: var(--ta-muted) !important;
+    font-size: 0.86rem !important;
+}
+.stTabs [aria-selected="true"] {
+    color: var(--ta-accent) !important;
+    border-bottom-color: var(--ta-accent) !important;
+}
 
-/* -- Metric cards -- */
+/* Inputs */
+.stTextInput input,
+.stNumberInput input,
+.stDateInput input {
+    background: #101518 !important;
+    border: 1px solid var(--ta-border) !important;
+    color: #e8edf0 !important;
+    border-radius: 6px !important;
+}
+.stTextInput input:focus,
+.stNumberInput input:focus,
+.stDateInput input:focus {
+    border-color: var(--ta-accent) !important;
+    box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.25) !important;
+}
+.stSelectbox [data-baseweb="select"] {
+    background: #101518 !important;
+    border-color: var(--ta-border) !important;
+    border-radius: 6px !important;
+}
+.stRadio [data-baseweb="radiogroup"] label {
+    color: var(--ta-muted) !important;
+}
+
+/* Alerts */
+div[data-testid="stAlert"] {
+    background: #11181c !important;
+    border: 1px solid var(--ta-border) !important;
+    border-radius: 8px !important;
+    color: #e6edf2 !important;
+}
+div[data-testid="stAlert"] p {
+    color: #e6edf2 !important;
+}
+
+/* Dataframe */
+.stDataFrame {
+    border: 1px solid var(--ta-border);
+    border-radius: 8px;
+    overflow: hidden;
+    font-size: 0.82rem !important;
+}
+.stDataFrame th {
+    background: #151b1f !important;
+    color: #b6c0c8 !important;
+    font-weight: 700 !important;
+    border-bottom: 1px solid var(--ta-border) !important;
+}
+.stDataFrame td {
+    color: #dde5eb !important;
+}
+
+/* Metric cards */
 div[data-testid="stMetric"] {
-    background: #141414; border: 1px solid #1e1e1e;
-    border-radius: 8px; padding: 0.75rem 1rem;
+    background: var(--ta-surface);
+    border: 1px solid var(--ta-border);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
 }
-div[data-testid="stMetric"]:hover { border-color: #2a2a2a; }
+div[data-testid="stMetric"]:hover {
+    border-color: var(--ta-border-strong);
+}
 
-/* -- Section divider -- */
-hr { border-color: #1a1a1a !important; margin: 1rem 0 !important; }
+hr {
+    border-color: var(--ta-border) !important;
+    margin: 1rem 0 !important;
+}
 """
 
 
 def inject_css():
     """Inject shared dark-theme CSS. Call once at the top of every page."""
     st.markdown(f"<style>{_CSS}</style>", unsafe_allow_html=True)
+
+
+def has_premium_access(required_plan: str = "supporter") -> bool:
+    from tradingagents.auth import get_license_status
+    from tradingagents.auth.plans import plan_allows
+    from web.auth_session import is_admin
+
+    if is_admin():
+        return True
+    status = get_license_status()
+    return bool(status.get("valid")) and plan_allows(
+        status.get("plan", "pro"),
+        required_plan,
+    )
+
+
+def require_premium_page(page_name: str, required_plan: str = "supporter") -> None:
+    """Stop rendering a paid page unless the current session is allowed."""
+    if has_premium_access(required_plan):
+        return
+
+    from tradingagents.auth.plans import plan_label
+
+    st.warning(f"{page_name} 需要{plan_label(required_plan)}或更高套餐。")
+    st.page_link("pages/activate.py", label="前往登录 / 激活", use_container_width=True)
+    st.stop()
 
 
 # ── Data Helpers ────────────────────────────────────────────────────────────────

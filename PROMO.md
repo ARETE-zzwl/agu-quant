@@ -1,126 +1,99 @@
-# 宣传文案 — 多平台适用
+# TradingAgents-Astock 宣传文案
 
----
+以下文案用于项目发布和早期用户招募。发布前请补充真实截图；不要添加收益承诺、夸大胜率或未经确认的付费入口。
 
-## GitHub README (已更新在 README.md)
+项目地址：<https://github.com/simonlin1212/TradingAgents-astock>
 
----
+## GitHub / Gitee 简介
 
-## 雪球 / 淘股吧
+TradingAgents-Astock 是一个面向 A 股的开源多 Agent 投研框架。
 
-### 标题：我开源了一个A股AI量化系统，97个Alpha因子+7Agent协作决策
+项目在 TradingAgents 基础上增加了政策、游资和解禁分析师，并接入多空辩论、风险评估、多因子研究、策略回测、模拟交易和 Web UI。数据层通过 mootdx 及公开 HTTP 接口获取行情、财务、资金流、龙虎榜、板块和资讯数据。
 
-**正文：**
+核心源码采用 Apache 2.0，支持本地部署和自备模型 API Key。
 
-做了半年多，从TradingAgents fork开始，自己加了大量A股专属功能：
+> 仅用于学习、研究和技术演示，不构成证券投资咨询或收益承诺。
 
-- 97个Alpha因子（含特质波动、盈利惊喜、日内反转等学术验证因子）
-- 7个AI Agent协作分析（市场/情绪/新闻/基本面/政策/游资/解禁）
-- 完整的因子回测引擎（IC/IR/夏普/相关性分析）
-- 15套预置策略+自定义权重，每天自动扫全市场选股
-- A股真实规则的模拟盘（T+1、涨跌停、印花税）
+## 知乎 / 掘金长文
 
-全部开源免费，GitHub直接下载运行。个人开发者，纯为爱发电，觉得有用可以赞赏支持（99/月 或 299/永久）。
+### 标题
 
-数据源全部免费（mootdx+东方财富+腾讯），配个DeepSeek API Key就能跑。
+我把 TradingAgents 做成了面向 A 股的 7 Agent 开源投研框架
 
-GitHub: [链接]
+### 正文
 
-#量化 #A股 #开源 #AI选股
+原版 TradingAgents 更偏向通用股票研究。为了适应 A 股，我在市场、情绪、新闻和基本面分析之外，又增加了三个角色：
 
----
+- 政策分析师：跟踪产业政策、监管变化和政策催化。
+- 游资追踪分析师：研究龙虎榜、资金流和短期交易结构。
+- 解禁监控分析师：关注限售解禁及潜在供给压力。
 
-## 知乎
+系统会让多头和空头研究员围绕分析结果辩论，再经过研究经理和风险角色形成结构化研究报告。项目同时提供多因子研究、策略回测、股票监控、模拟交易和 Streamlit Web UI。
 
-### 标题：如何用AI做A股量化选股？我开源了一个完整系统，97因子+7Agent
+数据侧不依赖 akshare，主要使用 mootdx 和东方财富、腾讯、新浪、同花顺、财联社等公开接口。用户可以自备 DeepSeek、OpenAI、Anthropic 等模型服务的 API Key。
 
-**正文：**
+项目核心源码已经按 Apache 2.0 开放：
 
-作为一个量化爱好者+程序员，我花了半年时间从零搭建了一套A股AI量化系统，现在完全开源。
+<https://github.com/simonlin1212/TradingAgents-astock>
 
-**它能做什么：**
+后续计划通过官方安装包、稳定更新、研究模板、自动报告、技术支持和私有部署覆盖维护成本。付费服务卖的是交付和持续支持，不是投资收益。
 
-1. **AI荐股**：每天收盘后自动扫描全市场1600+只A股，用97个Alpha因子做百分位评分，再结合15套策略（价值/成长/动量/资金流/反转）筛选Top标的，最后用DeepSeek做AI点评
+风险提示：任何模型和回测都有局限，历史数据不能保证未来表现，本项目不构成证券投资建议。
 
-2. **因子引擎**：8大类97个因子，可以做IC/IR分析、回测验证、相关性矩阵、AI权重优化。不是那种随便几个指标的玩具，是真正的量化因子库
+## V2EX / 社区短帖
 
-3. **深度分析**：7个AI Agent分别从市场技术、情绪、新闻、基本面、政策、游资、解禁角度分析一只股票，然后牛市研究员和熊市研究员辩论，最后研究经理+风控+组合经理三层决策
+### 标题
 
-4. **模拟交易**：完整复刻A股规则（T+1、涨跌停、科创板200股、印花税0.05%），可以验证策略的实战效果
+[开源] 面向 A 股的 7 Agent 投研框架，支持多空辩论和本地 Web UI
 
-**技术栈：** Python · Streamlit · Plotly · LangChain/LangGraph · DeepSeek · mootdx · 东方财富Push2
+### 正文
 
-**怎么用：** 下载代码 → pip install → 配个DeepSeek Key → 跑起来。数据源全是免费的。
+最近在维护一个 TradingAgents 的 A 股特化 fork：TradingAgents-Astock。
 
-**关于付费：** 开源免费，基础功能（大盘、板块、选股）全部免费。高级功能（AI荐股、因子引擎、深度分析、模拟盘）赞赏解锁，99/月或299/永久。用爱发电也不容易，理解万岁。
+目前包含 7 个分析角色、多空辩论、风险评估、多因子研究、策略回测、模拟交易和 Streamlit Web UI。数据主要通过 mootdx 和公开 HTTP 接口获取，支持本地部署和自备模型 Key。
 
-GitHub: [链接]
+项目采用 Apache 2.0：
 
-#人工智能 #量化投资 #开源项目 #Python
+<https://github.com/simonlin1212/TradingAgents-astock>
 
----
+欢迎提交数据源稳定性、模型兼容性和 A 股研究流程方面的 Issue。项目只用于研究和技术演示，不提供收益承诺。
 
-## 微信公众号
+## 微信公众号短文
 
-### 标题：我开源了一套A股AI量化系统，想和你分享
+### 标题
 
-**正文：**
+开源一个面向 A 股的多 Agent 投研框架
 
-朋友们好，我是[你的名字]。
+### 正文
 
-做了大半年的东西，最近终于感觉能拿得出手了。
+TradingAgents-Astock 是一个可以本地运行的 A 股研究工具。它让市场、情绪、新闻、基本面、政策、游资和解禁 7 个分析角色分别完成研究，再通过多空辩论与风险评估生成报告。
 
-**这是一个什么样的系统？**
+除了深度研究，项目还包括多因子选股、策略回测、股票监控、模拟交易和 Web UI。核心源码采用 Apache 2.0，用户可以自行配置模型 API Key。
 
-简单说，就是一个用AI帮你分析A股的软件。它每天帮你扫描全市场1600多只股票，用97个Alpha因子打分排名，然后告诉你今天哪些股票最值得关注。
+项目地址：
 
-更厉害的是，它还内置了7个AI"分析师"，会从不同角度分析一只股票，甚至相互辩论，最后给出一个完整的决策报告。
+<https://github.com/simonlin1212/TradingAgents-astock>
 
-**它有哪些功能？**
+后续会优先完善安装体验、自动报告和稳定更新服务。本文仅介绍开源软件，不构成任何投资建议。
 
-- 看到大盘涨跌、板块热点
-- 一键筛选条件的股票（比如PE小于20、ROE大于15%）
-- AI每天推荐精选标的
-- 模拟盘验证交易策略
+## X / Twitter
 
-**要不要钱？**
+I open-sourced TradingAgents-Astock, an A-share focused multi-agent research framework:
 
-基础功能完全免费。高级功能采用赞赏制——你觉得好用，99元/月或299元/永久。没有机构融资，纯靠大家的支持继续开发。
+- 7 analyst roles, including policy, active-capital and lock-up monitoring
+- bull/bear debate and multi-stage risk review
+- factor research, backtesting and paper trading
+- local Streamlit UI with user-provided model API keys
 
-**怎么获取？**
+GitHub: <https://github.com/simonlin1212/TradingAgents-astock>
 
-GitHub搜索"[项目名]"或点击阅读原文。
-不用安装复杂的数据库，下载 → 配置 → 就能跑。
+For research and education only. No investment advice or return guarantees.
 
----
+## 发布检查
 
-## Twitter / X
-
-🧵 I open-sourced an AI quantitative trading system for Chinese A-shares:
-
-1/ 97 Alpha factors + 7 AI agents working together for stock analysis
-2/ Factor backtesting engine (IC/IR/Sharpe/correlation)
-3/ 15 preset strategies + custom weight builder
-4/ Paper trading with real A-share rules (T+1, price limits)
-5/ All free data sources (no paid API needed)
-
-GitHub: [link]
-Free tier available. Premium via donation: $14/mo or $42 lifetime.
-
-#量化 #QuantitativeTrading #OpenSource #AI
-
----
-
-## V2EX / 小众软件
-
-### 标题：分享自制的A股AI量化选股工具，97因子+多Agent分析
-
-做了一年多，终于能用了。技术栈 Python + Streamlit + LangGraph + DeepSeek。
-
-免费功能足够散户日常看盘和选股，收费功能（99/月或299永久）适合重度玩家。收费全靠自觉赞赏，没有DRM，纯靠信任。
-
-有问题欢迎提Issue，功能建议也欢迎。
-
-**地址：** [GitHub链接]
-
-**界面截图：** [放4-5张图]
+- 使用真实产品截图，不使用占位图。
+- 确认版本号、安装命令和仓库链接有效。
+- 只展示已经开通的付款和客服渠道。
+- 不发布历史收益拼接、模拟盘冒充实盘等内容。
+- 明示模型成本、数据延迟和第三方接口可能失效。
+- 每篇内容保留“不构成投资建议”的风险提示。

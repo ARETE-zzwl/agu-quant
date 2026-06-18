@@ -40,7 +40,7 @@ summary_cols = st.columns(4)
 summary_cols[0].metric("可选策略", len(details))
 summary_cols[1].metric("策略族", len(families))
 summary_cols[2].metric("回测优选", families.get("回测优选", 0))
-summary_cols[3].metric("资金流策略", families.get("资金流", 0))
+summary_cols[3].metric("经典研究", families.get("经典研究", 0))
 
 select_col, family_col, risk_col = st.columns([3, 1, 1])
 selected_index = keys.index(query_strategy)
@@ -89,6 +89,10 @@ if filter_rows:
 else:
     st.caption("无硬性预筛选条件")
 st.write(selected["implementation"])
+if selected.get("research_sources"):
+    st.markdown("**研究来源**")
+    for source in selected["research_sources"]:
+        st.markdown(f"- [{source['title']}]({source['url']})")
 st.caption(selected["backtest_note"])
 
 st.markdown("---")

@@ -10,13 +10,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from web.components.common import inject_css
+from web.components.common import inject_css, require_premium_page
 from tradingagents.ranking.scoring_engine import ScoringEngine
 from tradingagents.ranking.signal_engine import evaluate_stock_signal
 from tradingagents.factors import ALL_FACTORS
 
 st.set_page_config(page_title="股票监控", page_icon="📡", layout="wide", initial_sidebar_state="expanded")
 inject_css()
+require_premium_page("股票监控")
 
 st.markdown(
     '<div style="margin-bottom:0.5rem;">'

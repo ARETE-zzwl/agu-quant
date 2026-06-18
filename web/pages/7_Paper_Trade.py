@@ -8,14 +8,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from web.components.common import inject_css
+from web.components.common import inject_css, require_premium_page
 from tradingagents.ranking.scoring_engine import ScoringEngine
 from tradingagents.ranking.signal_engine import evaluate_code_signal
 from tradingagents.ranking.recommendation_engine import run_paper_trade_quick_select
-from tradingagents.paper_trade import get_account, is_trading_time
+from tradingagents.ranking.portfolio_advisor import generate_portfolio_advice
+from tradingagents.paper_trade import build_signal_order_plan, get_account, is_trading_time
 
 st.set_page_config(page_title="模拟盘", page_icon="💰", layout="wide", initial_sidebar_state="expanded")
 inject_css()
+require_premium_page("模拟盘")
 
 
 def _market_status() -> tuple[str, str]:
@@ -177,6 +179,11 @@ def _equity_chart(acc):
     st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
 
+paper_import = st.session_state.pop("paper_import_candidates", None)
+if paper_import:
+    st.session_state["paper_quick_picks"] = paper_import
+    st.session_state["paper_import_notice"] = len(paper_import.get("recommendations", []))
+
 prefill = st.session_state.pop("paper_trade_prefill", None)
 if prefill:
     st.session_state["trd_code"] = prefill.get("code", "")
@@ -214,6 +221,17 @@ elif market_kind == "info":
     st.info("当前不在连续竞价时段，下单会按规则被拒绝")
 else:
     st.warning("当前休市或已收盘，下单会按规则被拒绝")
+
+imported_count = st.session_state.pop("paper_import_notice", 0)
+if imported_count:
+    st.success(f"已从AI荐股导入 {imported_count} 只候选股，请在“一键选股”页签确认；交易时段可一键买入。")
+
+with st.expander("回测选股与卖出信号如何工作", expanded=False):
+    st.markdown(
+        "回测每个调仓日只使用前一交易日可见的因子数据，对股票做横截面排名；进入目标Top组合即买入，"
+        "跌出目标组合即卖出，并扣除换手成本。模拟仓持仓管理更细：止损/趋势破坏触发清仓，"
+        "高位过热触发止盈或减仓，强信号且仓位条件合适才允许加仓；所有卖出仍受T+1、跌停和交易时段约束。"
+    )
 
 tab_pick, tab_pos, tab_trade, tab_orders, tab_rules = st.tabs([
     "一键选股", "持仓信号", "下单交易", "资产委托", "规则管理"
@@ -293,10 +311,13 @@ with tab_pick:
             labels = [f"{r['代码']} {r['名称']} | {r['操作']} | {r['综合分']}分" for r in recs]
             selected_label = st.selectbox("选择候选操作", labels)
             selected_row = recs[labels.index(selected_label)]
-            remain_slots = max(1, 10 - len(summary["positions"]))
-            suggested_amount = int(max(5_000, min(summary["cash"] * 0.95 / remain_slots, 100_000)) // 1000 * 1000)
+            remain_slots = max(0, 10 - len(summary["positions"]))
+            suggested_amount = (
+                int(max(5_000, min(summary["cash"] * 0.95 / remain_slots, 100_000)) // 1000 * 1000)
+                if remain_slots else 0
+            )
             b1, b2 = st.columns(2)
-            if b1.button("填入买入单", width="stretch"):
+            if b1.button("填入买入单", width="stretch", disabled=remain_slots == 0):
                 st.session_state["paper_trade_prefill"] = {
                     "code": selected_row["代码"],
                     "action": "买入",
@@ -304,7 +325,12 @@ with tab_pick:
                     "amount": suggested_amount,
                 }
                 st.rerun()
-            if b2.button("一键买入全部候选", type="primary", width="stretch"):
+            if b2.button(
+                "一键买入全部候选",
+                type="primary",
+                width="stretch",
+                disabled=remain_slots == 0,
+            ):
                 if not market_open:
                     st.error("当前非交易时间，无法一键买入；可以先填入买入单，开盘后确认。")
                 else:
@@ -322,6 +348,8 @@ with tab_pick:
                     if rejected:
                         st.warning("；".join(rejected[:3]))
                     st.rerun()
+            if remain_slots == 0:
+                st.info("模拟仓已达到10只持仓上限，请先按持仓信号减仓或清仓。")
         else:
             st.warning("当前没有满足门槛的候选股。可以扩大股票池，或把信号门槛下调到60-65之间。")
 
@@ -425,23 +453,63 @@ with tab_pos:
                         hide_index=True,
                     )
 
+        st.markdown("#### AI 持仓分析")
+        if st.button("AI一键生成持仓分析与操作建议", type="primary", width="stretch"):
+            provider = st.session_state.get("llm_provider", "deepseek")
+            model = st.session_state.get("quick_think_llm", "deepseek-chat")
+            try:
+                with st.spinner(f"{provider}/{model} 正在分析持仓..."):
+                    st.session_state["paper_portfolio_ai"] = generate_portfolio_advice(
+                        summary,
+                        signal_details,
+                        provider=provider,
+                        model=model,
+                    )
+            except Exception as exc:
+                st.error(f"AI持仓分析失败: {exc}")
+        if st.session_state.get("paper_portfolio_ai"):
+            st.info(st.session_state["paper_portfolio_ai"])
+        st.caption("AI只解释现有规则、因子和指标，不会绕过T+1或替代模拟仓下单校验。")
+
         p_codes = [f"{p['code']} {p['name']}" for p in summary["positions"]]
         pick = st.selectbox("选择持仓操作", p_codes)
         selected_pos = summary["positions"][p_codes.index(pick)]
-        b1, b2, b3 = st.columns(3)
-        if b1.button("填入卖出", width="stretch"):
+        selected_sig = next(sig for pos, sig in signal_details if pos["code"] == selected_pos["code"])
+        order_plan = build_signal_order_plan(selected_sig, selected_pos)
+        st.caption(f"当前规则动作：{selected_sig.get('action_cn', '持有')}。{order_plan['reason']}")
+
+        b1, b2, b3, b4 = st.columns(4)
+        if b1.button(
+            f"按信号减仓 {order_plan['shares']}股" if order_plan["kind"] == "reduce" else "按信号减仓",
+            width="stretch",
+            disabled=order_plan["kind"] != "reduce" or not order_plan["enabled"],
+        ):
             st.session_state["paper_trade_prefill"] = {
                 "code": selected_pos["code"], "action": "卖出",
-                "qty": max(100, int(selected_pos["sellable"] or selected_pos["shares"])),
+                "qty": order_plan["shares"],
             }
             st.rerun()
-        if b2.button("填入加仓", width="stretch"):
+        if b2.button(
+            f"按信号加仓 {order_plan['shares']}股" if order_plan["kind"] == "add" else "按信号加仓",
+            width="stretch",
+            disabled=order_plan["kind"] != "add" or not order_plan["enabled"],
+        ):
             st.session_state["paper_trade_prefill"] = {
-                "code": selected_pos["code"], "action": "买入", "qty": 100,
+                "code": selected_pos["code"], "action": "买入", "qty": order_plan["shares"],
             }
             st.rerun()
-        if b3.button("刷新持仓信号", width="stretch"):
+        if b3.button(
+            f"按信号清仓 {order_plan['shares']}股" if order_plan["kind"] == "clear" else "按信号清仓",
+            width="stretch",
+            disabled=order_plan["kind"] != "clear" or not order_plan["enabled"],
+        ):
+            st.session_state["paper_trade_prefill"] = {
+                "code": selected_pos["code"], "action": "卖出", "qty": order_plan["shares"],
+            }
+            st.rerun()
+        if b4.button("刷新持仓信号", width="stretch"):
             load_position_signal.clear()
+            st.session_state.pop("paper_portfolio_ai", None)
             st.rerun()
     else:
         st.info("暂无持仓")

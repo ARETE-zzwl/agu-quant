@@ -4,37 +4,53 @@ import sys
 from datetime import datetime
 
 from .license import generate_license_key
-from .user_db import add_license, list_users, update_license_status, reset_devices
+from .plans import normalize_plan, plan_label
+from .user_db import (
+    add_license,
+    list_users,
+    normalize_user_name,
+    reset_devices,
+    update_license_status,
+    validate_expire_month,
+)
 
 
 def cmd_generate(args):
     user = args.user
     if not user:
-        print("用法: --user <用户名> [--expire YYYYMM] [--permanent]")
+        print("用法: --user <用户名> [--plan supporter|pro] [--expire YYYYMM] [--permanent]")
         return
 
-    if getattr(args, "permanent", False):
-        expire = "999912"
-    else:
-        expire = getattr(args, "expire", None) or (datetime.now().strftime("%Y%m") + "01")
-        # default: expire end of current year
-        if not getattr(args, "expire", None):
-            expire = datetime.now().strftime("%Y") + "12"
+    try:
+        user = normalize_user_name(user)
+        if getattr(args, "permanent", False):
+            expire = "999912"
+        else:
+            expire = getattr(args, "expire", None) or datetime.now().strftime("%Y") + "12"
+            expire = validate_expire_month(expire)
+        plan = normalize_plan(getattr(args, "plan", "pro"))
+    except ValueError as exc:
+        print(f"参数错误: {exc}")
+        return
 
-    key = generate_license_key(user, expire)
+    key = generate_license_key(user, expire, plan=plan)
     import hashlib
     key_hash = hashlib.sha256(key.encode()).hexdigest()
 
     max_dev = int(getattr(args, "devices", 1) or 1)
-    if add_license(user, key_hash, expire, max_dev):
-        perm_str = "永久" if expire == "999912" else f"到期 {expire[:4]}-{expire[4:]}"
-        print(f"用户: {user}")
-        print(f"激活码: {key}")
-        print(f"有效期: {perm_str}")
-        print(f"设备数: {max_dev}")
-        print("已保存到数据库")
-    else:
-        print("添加失败（可能已存在）")
+    try:
+        if add_license(user, key_hash, expire, max_dev, plan=plan):
+            perm_str = "永久" if expire == "999912" else f"到期 {expire[:4]}-{expire[4:]}"
+            print(f"用户: {user}")
+            print(f"激活码: {key}")
+            print(f"有效期: {perm_str}")
+            print(f"套餐: {plan_label(plan)}")
+            print(f"设备数: {max_dev}")
+            print("已保存到数据库")
+        else:
+            print("添加失败（用户或激活码可能已存在）")
+    except ValueError as exc:
+        print(f"参数错误: {exc}")
 
 
 def cmd_list(args):
@@ -42,14 +58,14 @@ def cmd_list(args):
     if not users:
         print("暂无用户")
         return
-    print(f"{'ID':<4} {'用户名':<12} {'到期':<10} {'设备':<6} {'状态':<6} {'创建时间'}")
+    print(f"{'ID':<4} {'用户名':<12} {'套餐':<10} {'到期':<10} {'设备':<6} {'状态':<6} {'创建时间'}")
     print("-" * 60)
     for u in users:
         em = u["expire_month"]
         exp_str = "永久" if em == "999912" else f"{em[:4]}-{em[4:]}"
         dev_str = f"{u['device_count']}/{u['max_devices']}"
         act_str = "启用" if u["active"] else "禁用"
-        print(f"{u['id']:<4} {u['user_name']:<12} {exp_str:<10} {dev_str:<6} {act_str:<6} {u['created_at']}")
+        print(f"{u['id']:<4} {u['user_name']:<12} {plan_label(u.get('plan', 'pro')):<10} {exp_str:<10} {dev_str:<6} {act_str:<6} {u['created_at']}")
 
 
 def cmd_disable(args):
@@ -95,7 +111,7 @@ def cmd_stats(args):
 def main():
     if len(sys.argv) < 2:
         print("""管理员工具:
-  generate --user 用户名 [--expire YYYYMM] [--permanent] [--devices N]  生成激活码
+  generate --user 用户名 [--plan supporter|pro] [--expire YYYYMM] [--permanent] [--devices N]
   list                                                                    查看所有用户
   disable --user 用户名                                                   禁用用户
   enable --user 用户名                                                    启用用户
@@ -110,6 +126,7 @@ def main():
     args = Args()
     args.user = None
     args.expire = None
+    args.plan = "pro"
     args.permanent = False
     args.devices = 1
 
@@ -119,6 +136,8 @@ def main():
             args.user = sys.argv[i + 1]; i += 2
         elif sys.argv[i] == "--expire" and i + 1 < len(sys.argv):
             args.expire = sys.argv[i + 1]; i += 2
+        elif sys.argv[i] == "--plan" and i + 1 < len(sys.argv):
+            args.plan = sys.argv[i + 1]; i += 2
         elif sys.argv[i] == "--permanent":
             args.permanent = True; i += 1
         elif sys.argv[i] == "--devices" and i + 1 < len(sys.argv):

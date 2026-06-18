@@ -1,4 +1,4 @@
-"""AI 荐股 — 12套策略 + 自定义权重."""
+"""AI 荐股与多策略回测研究台."""
 
 from datetime import datetime
 import pandas as pd
@@ -7,37 +7,143 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from web.components.common import inject_css
+from web.components.common import inject_css, require_premium_page
 from tradingagents.ranking.scoring_engine import ScoringEngine
 from tradingagents.ranking.signal_engine import evaluate_code_signal
-from tradingagents.ranking.recommendation_engine import run_one_click_recommendation
+from tradingagents.ranking.recommendation_engine import (
+    recommend_strategy_candidates,
+    run_one_click_recommendation,
+)
 
-st.set_page_config(page_title="AI 荐股", page_icon="🧠", layout="wide", initial_sidebar_state="expanded")
+
+def _build_paper_import(stocks: list[dict], strategy_key: str) -> dict:
+    """Convert screened rows into the paper-trade candidate contract."""
+    recommendations = []
+    for stock in stocks:
+        signal = stock.get("_signal", {})
+        action = signal.get("action", "")
+        if action not in {"BUY", "WATCH"} or signal.get("risk_level") == "高":
+            continue
+        levels = signal.get("levels", {})
+        recommendations.append({
+            "代码": stock["code"],
+            "名称": stock.get("name", ""),
+            "操作": signal.get("action_cn", "观察"),
+            "动作Key": action,
+            "综合分": stock.get("_final_score", stock.get("_score", 0)),
+            "选股分": stock.get("_score", 0),
+            "信号分": signal.get("score", 0),
+            "置信度": signal.get("confidence", 0),
+            "风险": signal.get("risk_level", "未知"),
+            "现价": stock.get("price", 0),
+            "涨跌幅%": stock.get("change_pct", 0),
+            "换手%": stock.get("turnover", 0),
+            "PE": stock.get("pe", 0),
+            "PB": stock.get("pb", 0),
+            "止损": levels.get("stop_loss", ""),
+            "止盈": levels.get("take_profit", ""),
+            "补仓观察": levels.get("add_price", ""),
+            "理由": "；".join(signal.get("reasons", [])[:3]),
+            "风险提示": "；".join(signal.get("risk_notes", [])[:2]),
+        })
+    return {
+        "strategy_key": strategy_key,
+        "strategy_label": ScoringEngine.get_strategies().get(strategy_key, {}).get("label", strategy_key),
+        "strategy_desc": "由AI荐股页筛选并导入，仍需在交易时段确认模拟买入。",
+        "universe_size": len(stocks),
+        "entry_actions": ["BUY", "WATCH"],
+        "min_entry_score": 0,
+        "recommendations": recommendations,
+    }
+
+
+def _candidate_rows_to_stocks(rows: list[dict]) -> list[dict]:
+    """Convert strategy-workbench rows into the shared pick/session contract."""
+    return [
+        {
+            "code": row["代码"],
+            "name": row["名称"],
+            "_score": row["选股分"],
+            "_final_score": row["综合分"],
+            "price": row["现价"],
+            "change_pct": row["涨跌幅%"],
+            "turnover": row.get("换手%", 0),
+            "pe": row.get("PE", 0),
+            "pb": row.get("PB", 0),
+            "_signal": {
+                "action": row["动作Key"],
+                "action_cn": row["操作"],
+                "score": row["信号分"],
+                "confidence": row.get("置信度", 0),
+                "risk_level": row["风险"],
+                "levels": {
+                    "stop_loss": row["止损"],
+                    "take_profit": row["止盈"],
+                    "add_price": row.get("补仓观察", ""),
+                },
+                "reasons": [row["理由"]] if row["理由"] else [],
+                "risk_notes": [row["风险提示"]] if row["风险提示"] else [],
+            },
+        }
+        for row in rows
+    ]
+
+
+def _display_candidate_table(rows: list[dict], *, show_status: bool = True) -> None:
+    display_rows = []
+    for i, row in enumerate(rows, start=1):
+        item = {
+            "排名": i,
+            "代码": row["代码"],
+            "名称": row["名称"],
+            "操作": row["操作"],
+            "综合分": row["综合分"],
+            "选股分": row["选股分"],
+            "信号分": row["信号分"],
+            "风险": row["风险"],
+            "现价": row["现价"],
+            "涨跌幅": f"{row['涨跌幅%']:+.1f}%",
+            "止损": row["止损"],
+            "止盈": row["止盈"],
+            "理由": row["理由"],
+            "风险提示": row["风险提示"],
+        }
+        if show_status:
+            item = {
+                "排名": i,
+                "入选状态": row.get("入选状态", "—"),
+                **{key: value for key, value in item.items() if key != "排名"},
+            }
+        display_rows.append(item)
+    st.dataframe(pd.DataFrame(display_rows), use_container_width=True, hide_index=True, height=430)
+
+st.set_page_config(page_title="AI 荐股", page_icon="🧠", layout="wide", initial_sidebar_state="collapsed")
 inject_css()
+require_premium_page("AI 荐股")
 
 st.markdown(
     '<div style="margin-bottom:1rem;">'
     '<span style="font-size:1.4rem;font-weight:800;color:#f5f1eb;">🧠 AI 荐股</span>'
-    '<span style="color:#666;font-size:0.85rem;margin-left:0.8rem;">12套策略 + 自定义权重 · 量化评分 + AI 点评</span></div>',
+    f'<span style="color:#8f8a82;font-size:0.85rem;margin-left:0.8rem;">{len(ScoringEngine.get_presets())}套策略 · 回测研究台 · 模拟仓联动</span></div>',
     unsafe_allow_html=True,
 )
 
 # ── One-click Recommendation ────────────────────────────────────────────────────
 
-with st.expander("🎯 一键推荐当下候选股", expanded=True):
-    st.caption("自动选择高流动性股票池，回测筛选策略，再用当前行情和风控信号过滤。结果仅供研究和模拟盘参考。")
-    oc1, oc2, oc3, oc4 = st.columns([1, 1, 1, 1])
+with st.expander("🎯 多策略回测与当下选股", expanded=True):
+    st.caption("同一股票池、同一时间窗比较全部策略；冠军和其他策略都可以继续查看当前具体选股。")
+    oc1, oc2, oc3, oc4 = st.columns([1, 1, 1, 1.15])
     oc_universe = oc1.selectbox("股票池规模", [40, 60, 100], index=1)
-    oc_period = oc2.selectbox("回测周期", [90, 180, 365], index=1, format_func=lambda d: f"近{d}天")
-    oc_n = oc3.selectbox("推荐数量", [5, 10, 15], index=1)
-    one_click = oc4.button("一键推荐", type="primary", use_container_width=True)
+    oc_period = oc2.selectbox("回测周期", [90, 180, 365], index=1, format_func=lambda days: f"近{days}天")
+    oc_n = oc3.selectbox("每套查看", [5, 10, 15], index=1, format_func=lambda count: f"Top {count}")
+    one_click = oc4.button("开始多策略回测", type="primary", use_container_width=True)
 
     if one_click:
-        with st.status("一键推荐运行中...", expanded=True) as status:
+        with st.status("正在建立策略研究台...", expanded=True) as status:
             try:
-                st.write("📡 获取高流动性股票池...")
-                st.write("🧪 回测比较预设策略...")
-                st.write("🧭 叠加当前信号和风险过滤...")
+                st.write("📡 获取同一组高流动性股票池")
+                st.write("🧪 用统一成本和调仓规则比较全部策略")
+                st.write("🧭 为冠军策略叠加当前信号与风险过滤")
                 result = run_one_click_recommendation(
                     universe_size=oc_universe,
                     recommend_n=oc_n,
@@ -47,69 +153,119 @@ with st.expander("🎯 一键推荐当下候选股", expanded=True):
                     max_positions=10,
                 )
                 st.session_state["one_click_picks"] = result
-                status.update(label="✅ 一键推荐完成", state="complete")
+                st.session_state["one_click_strategy_results"] = {}
+                status.update(label="✅ 策略研究台已更新", state="complete")
             except Exception as exc:
-                status.update(label="❌ 一键推荐失败", state="error")
-                st.error(f"一键推荐失败: {exc}")
+                status.update(label="❌ 多策略回测失败", state="error")
+                st.error(f"多策略回测失败: {exc}")
 
     oc_result = st.session_state.get("one_click_picks")
     if oc_result:
         best = oc_result["best_strategy"]
-        mt = best["metrics"]
-        for note in oc_result.get("notes", []):
-            st.caption(f"说明: {note}")
-        st.markdown("#### 当前回测胜出策略")
-        b1, b2, b3, b4, b5 = st.columns(5)
-        b1.metric("策略", best["label"])
-        b2.metric("目标分", f"{mt['objective_score']:.1f}")
-        b3.metric("年化收益", f"{mt['annual_return']*100:.1f}%")
-        b4.metric("夏普", f"{mt['sharpe_ratio']:.2f}")
-        b5.metric("最大回撤", f"{mt['max_drawdown']*100:.1f}%")
+        result_view = st.radio(
+            "结果视图",
+            ["🏆 冠军结果", "🧭 策略研究台", "📐 口径说明"],
+            horizontal=True,
+            key="one_click_result_view",
+            label_visibility="collapsed",
+        )
 
-        recs = oc_result.get("recommendations", [])
-        if recs:
-            st.markdown("#### 当下候选股")
-            display_rows = []
-            for i, r in enumerate(recs, start=1):
-                display_rows.append({
-                    "排名": i,
-                    "代码": r["代码"],
-                    "名称": r["名称"],
-                    "操作": r["操作"],
-                    "综合分": r["综合分"],
-                    "信号分": r["信号分"],
-                    "风险": r["风险"],
-                    "现价": r["现价"],
-                    "涨跌幅%": f"{r['涨跌幅%']:+.1f}%",
-                    "PE": f"{r['PE']:.1f}" if r["PE"] > 0 else "—",
-                    "止损": r["止损"],
-                    "止盈": r["止盈"],
-                    "理由": r["理由"],
-                    "风险提示": r["风险提示"],
-                })
-            st.dataframe(pd.DataFrame(display_rows), use_container_width=True, hide_index=True)
-            st.session_state["picks_data"] = [
-                {
-                    "code": r["代码"],
-                    "name": r["名称"],
-                    "_score": r["综合分"],
-                    "change_pct": r["涨跌幅%"],
-                    "_signal": {
-                        "action_cn": r["操作"],
-                        "score": r["信号分"],
-                        "risk_level": r["风险"],
-                        "levels": {"stop_loss": r["止损"], "take_profit": r["止盈"]},
-                        "reasons": [r["理由"]],
-                    },
-                }
-                for r in recs
-            ]
-            st.session_state["picks_strategy"] = best["key"]
+        if result_view == "🏆 冠军结果":
+            metrics = best["metrics"]
+            b1, b2, b3, b4, b5 = st.columns(5)
+            b1.metric("冠军策略", best["label"])
+            b2.metric("目标分", f"{metrics['objective_score']:.1f}")
+            b3.metric("年化收益", f"{metrics['annual_return'] * 100:.1f}%")
+            b4.metric("夏普", f"{metrics['sharpe_ratio']:.2f}")
+            b5.metric("最大回撤", f"{metrics['max_drawdown'] * 100:.1f}%")
+            st.caption(best.get("desc", ""))
+
+            champion_rows = oc_result.get("strategy_candidates", oc_result.get("recommendations", []))
+            if champion_rows:
+                _display_candidate_table(champion_rows)
+                if st.button("采用冠军选股", type="primary", key="use_champion_picks"):
+                    st.session_state["picks_data"] = _candidate_rows_to_stocks(champion_rows)
+                    st.session_state["picks_strategy"] = best["key"]
+                    st.success("冠军选股已设为当前候选，可在页面下方加入模拟仓或生成 AI 点评。")
+            else:
+                st.warning("冠军策略当前没有通过数据完整性检查的候选股。")
+
+        elif result_view == "🧭 策略研究台":
+            strategy_rows = oc_result.get("strategy_rows", [])
+            st.markdown(f"**本轮已比较 {len(strategy_rows)} 套策略。** 排名不是黑箱终点，选择任意一套继续看它今天选了谁。")
+            st.dataframe(pd.DataFrame(strategy_rows), use_container_width=True, hide_index=True, height=360)
+
+            if strategy_rows:
+                default_index = 1 if len(strategy_rows) > 1 else 0
+                selected_index = st.selectbox(
+                    "查看哪套策略的具体选股",
+                    range(len(strategy_rows)),
+                    index=default_index,
+                    format_func=lambda index: (
+                        f"#{strategy_rows[index]['排名']}  {strategy_rows[index]['策略']}"
+                        f"  · 目标分 {strategy_rows[index]['目标分']:.1f}"
+                    ),
+                )
+                selected_row = strategy_rows[selected_index]
+                selected_key = selected_row["策略Key"]
+                detail = ScoringEngine.get_strategy_detail(selected_key)
+
+                d1, d2, d3, d4 = st.columns(4)
+                d1.metric("本轮排名", f"#{selected_row['排名']}")
+                d2.metric("年化", f"{selected_row['年化%']:.1f}%")
+                d3.metric("夏普", f"{selected_row['夏普']:.2f}")
+                d4.metric("回撤", f"{selected_row['回撤%']:.1f}%")
+                st.markdown(f"**{detail['label']}** · {detail['family']} · 风险 {detail['risk_level']} · 持有 {detail['holding_period']}")
+                st.caption(detail["implementation"])
+
+                weight_text = " · ".join(
+                    f"{label} {detail['weights'][key]:.0%}"
+                    for key, label in {
+                        "value_quality": "价值质量",
+                        "momentum": "动量",
+                        "money_flow": "资金",
+                        "sentiment": "情绪",
+                        "size": "低波/规模",
+                    }.items()
+                )
+                st.caption(f"权重：{weight_text}")
+                if detail.get("research_sources"):
+                    st.markdown("研究来源：" + " · ".join(
+                        f"[{source['title']}]({source['url']})" for source in detail["research_sources"]
+                    ))
+
+                cache = st.session_state.setdefault("one_click_strategy_results", {})
+                load_col, hint_col = st.columns([1, 2.4])
+                if load_col.button("加载该策略选股", type="primary", use_container_width=True, key=f"load_{selected_key}"):
+                    universe = oc_result.get("universe", [])
+                    if not universe:
+                        st.warning("这是旧版回测缓存，请重新点击“开始多策略回测”后再查看。")
+                    else:
+                        with st.spinner(f"正在计算 {detail['label']} 的当前信号..."):
+                            cache[selected_key] = recommend_strategy_candidates(
+                                universe,
+                                strategy_key=selected_key,
+                                recommend_n=oc_n,
+                                end_date=oc_result.get("date"),
+                            )
+                hint_col.caption("候选会保留中性信号并标为“仅排名”，便于研究；加入模拟仓时仍只接受买入/观察且非高风险标的。")
+
+                selected_result = cache.get(selected_key)
+                if selected_result:
+                    selected_candidates = selected_result["candidates"]
+                    _display_candidate_table(selected_candidates)
+                    if st.button("采用这套策略的选股", key=f"use_{selected_key}"):
+                        st.session_state["picks_data"] = _candidate_rows_to_stocks(selected_candidates)
+                        st.session_state["picks_strategy"] = selected_key
+                        st.success(f"已采用 {detail['label']}，可在页面下方加入模拟仓或生成 AI 点评。")
+
         else:
-            st.warning("当前没有通过严格过滤的候选股。可以扩大股票池或缩短回测周期，但不要为了凑数量放松风控。")
-
-        with st.expander("查看策略回测排名", expanded=False):
-            st.dataframe(pd.DataFrame(oc_result["strategy_rows"]), use_container_width=True, hide_index=True)
+            st.markdown(
+                "回测先按当前成交额建立高流动性股票池，再在统一的时间区间、调仓频率、持仓上限和交易成本下比较策略。"
+                "目标分同时考虑年化收益、夏普、胜率、最大回撤和换手率；它用于同轮相对比较，不等于未来收益预测。"
+            )
+            for note in oc_result.get("notes", []):
+                st.caption(f"• {note}")
 
 # ── Strategy Selection ───────────────────────────────────────────────────────────
 
@@ -212,6 +368,10 @@ if go:
             sort_desc=True,
             page_size=300,
         )
+        if not stocks:
+            status.update(label="行情源暂不可用", state="error")
+            st.warning("东方财富 push2 暂时没有返回可用股票数据，请稍后重试或降低扫描数量。")
+            st.stop()
         st.write(f"✅ 初筛 {len(stocks)} 只 (全市场 {total} 只)")
 
         st.write("📊 五因子百分位评分...")
@@ -273,6 +433,21 @@ if go:
 top_stocks = st.session_state.get("picks_data")
 if top_stocks:
     st.markdown("---")
+    paper_import = _build_paper_import(
+        top_stocks,
+        st.session_state.get("picks_strategy", "balanced"),
+    )
+    import_col, import_hint = st.columns([1, 2])
+    if import_col.button(
+        f"加入模拟仓候选 ({len(paper_import['recommendations'])})",
+        type="primary",
+        use_container_width=True,
+        disabled=not paper_import["recommendations"],
+    ):
+        st.session_state["paper_import_candidates"] = paper_import
+        st.switch_page("pages/7_Paper_Trade.py")
+    import_hint.caption("只导入买入/观察且非高风险的候选；实际成交仍由模拟仓按交易时间、资金、涨跌停和手数规则校验。")
+
     st.markdown("### 🤖 AI 深度点评")
 
     if st.button("生成 AI 点评 (Top 5)", type="primary"):

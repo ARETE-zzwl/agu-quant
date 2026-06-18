@@ -351,6 +351,86 @@ STRATEGIES = {
         "best_for": "想尝试更前沿价量/风险因子，但仍希望用低风险质量约束动量暴露的用户",
         "implementation": "使用波动目标动量、趋势一致性、残差动量识别趋势，配合波动稳定性、Amihud流动性和短线反转过滤高冲击成本标的。",
     },
+    "classic_12_1_momentum": {
+        "label": "经典 12-1 动量",
+        "desc": "跳过最近1个月观察中期赢家延续，并用价格路径与下行风险过滤追高噪音",
+        "filters": {"turnover_min": 1},
+        "weights": {"value_quality": 0.05, "momentum": 0.60, "money_flow": 0.15, "sentiment": 0.05, "size": 0.15},
+        "factor_map": "research_classics",
+        "family": "经典研究",
+        "risk_level": "中高",
+        "holding_period": "10-40个交易日",
+        "best_for": "趋势扩散、行业轮动较清晰的阶段；不适合单日情绪脉冲或连续涨停后的追高",
+        "implementation": "以12-1月动量和6月动量为核心，叠加价格通道、上涨路径质量和量价确认；下行风险维度用于降低高波动赢家的权重。",
+        "research_sources": [
+            {
+                "title": "Jegadeesh & Titman (1993), Returns to Buying Winners and Selling Losers",
+                "url": "https://doi.org/10.1111/j.1540-6261.1993.tb04702.x",
+            }
+        ],
+    },
+    "research_value_momentum": {
+        "label": "经典 价值×动量",
+        "desc": "价值负责安全边际，动量负责避开持续下跌的价值陷阱",
+        "filters": {"pe_max": 45},
+        "weights": {"value_quality": 0.40, "momentum": 0.35, "money_flow": 0.10, "sentiment": 0.00, "size": 0.15},
+        "factor_map": "research_classics",
+        "family": "经典研究",
+        "risk_level": "中",
+        "holding_period": "20-60个交易日",
+        "best_for": "估值分化后出现趋势确认的修复行情，希望兼顾赔率与右侧确认的用户",
+        "implementation": "用盈利收益率、质量价差和质量估值刻画价值，再与12-1月动量、趋势路径和下行风险共同排序，避免只买便宜不买改善。",
+        "research_sources": [
+            {
+                "title": "Asness, Moskowitz & Pedersen (2013), Value and Momentum Everywhere",
+                "url": "https://doi.org/10.1111/jofi.12021",
+            }
+        ],
+    },
+    "research_quality_momentum": {
+        "label": "经典 质量×动量",
+        "desc": "盈利质量与趋势质量双确认，寻找基本面更稳、价格趋势更干净的标的",
+        "filters": {"roe_min": 8},
+        "weights": {"value_quality": 0.38, "momentum": 0.37, "money_flow": 0.10, "sentiment": 0.00, "size": 0.15},
+        "factor_map": "research_classics",
+        "family": "经典研究",
+        "risk_level": "中",
+        "holding_period": "15-50个交易日",
+        "best_for": "结构性成长或景气扩散阶段，希望减少纯题材趋势和盈利脆弱标的的用户",
+        "implementation": "以ROE趋势、质量价差、动量质量和价格路径为主；量价与下行风险只做确认，不把短期情绪热度当成核心收益来源。",
+        "research_sources": [
+            {
+                "title": "Asness, Frazzini & Pedersen, Quality Minus Junk",
+                "url": "https://www.aqr.com/Insights/Research/Working-Paper/Quality-Minus-Junk",
+            },
+            {
+                "title": "Quality Minus Junk (SSRN 2312432)",
+                "url": "https://doi.org/10.2139/ssrn.2312432",
+            },
+        ],
+    },
+    "research_downside_defense": {
+        "label": "经典 下行风险防御",
+        "desc": "只惩罚下跌波动与尾部风险，用Sortino和回撤控制构建防御候选池",
+        "filters": {"pe_max": 50},
+        "weights": {"value_quality": 0.30, "momentum": 0.10, "money_flow": 0.05, "sentiment": 0.00, "size": 0.55},
+        "factor_map": "research_classics",
+        "family": "经典研究",
+        "risk_level": "低中",
+        "holding_period": "20-80个交易日",
+        "best_for": "指数震荡、风险偏好收缩或组合需要降低尾部暴露的阶段",
+        "implementation": "下行波动、Sortino、尾部风险、最大回撤和价格稳定性占主导，质量价值用于避免低波但经营恶化的标的，保留少量趋势确认。",
+        "research_sources": [
+            {
+                "title": "Ang, Hodrick, Xing & Zhang (2006), The Cross-Section of Volatility and Expected Returns",
+                "url": "https://doi.org/10.1111/j.1540-6261.2006.00836.x",
+            },
+            {
+                "title": "NBER Working Paper 10852",
+                "url": "https://doi.org/10.3386/w10852",
+            },
+        ],
+    },
     "balanced": {
         "label": "综合均衡",
         "desc": "五因子等权 + 无预设偏差 → 适合作为基准组合",
@@ -446,6 +526,7 @@ def _strategy_detail(key: str, cfg: dict) -> dict:
             "backtest_note",
             "历史收益来自当前回测引擎和样本区间，只能用于研究比较，不能视为未来收益承诺。",
         ),
+        "research_sources": cfg.get("research_sources", []),
     }
 
 

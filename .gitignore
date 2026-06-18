@@ -1,5 +1,6 @@
 # Sensitive
 .env
+.env.local
 *.key
 *.pem
 paper_trade/
@@ -12,6 +13,7 @@ __pycache__/
 dist/
 build/
 *.spec
+!Agu.spec
 
 # IDE
 .vscode/

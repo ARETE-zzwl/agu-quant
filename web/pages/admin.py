@@ -1,7 +1,8 @@
 """管理员看板 — 用户管理 · 激活码 · 邮件群发 · 数据统计."""
 
+from __future__ import annotations
+
 import hashlib
-import os
 from datetime import datetime
 
 import pandas as pd
@@ -10,190 +11,275 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from web.components.common import inject_css
 from tradingagents.auth.license import generate_license_key
+from tradingagents.auth.plans import PLAN_LABELS, plan_label
 from tradingagents.auth.user_db import (
-    add_license, list_users, update_license_status, reset_devices,
+    add_license,
+    get_license_key_hash_for_user,
+    list_users,
+    normalize_user_name,
+    reset_devices,
+    update_license_status,
+    validate_expire_month,
 )
+from web.auth_session import is_admin, sign_out
+from web.components.common import inject_css
 
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
-
-st.set_page_config(page_title="管理员看板", page_icon="🛡️", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="管理员看板", page_icon="🛡️", layout="wide", initial_sidebar_state="collapsed")
 inject_css()
 
-if "admin_authed" not in st.session_state:
-    st.session_state["admin_authed"] = False
 
-if not st.session_state["admin_authed"]:
-    st.markdown("### 🛡️ 管理员登录")
-    pw = st.text_input("密码", type="password")
-    if st.button("登录", type="primary"):
-        if pw == ADMIN_PASSWORD:
-            st.session_state["admin_authed"] = True
-            st.rerun()
-        else:
-            st.error("密码错误")
-    st.caption("在 .env 文件中修改 ADMIN_PASSWORD")
+def _format_expire(expire_month: str) -> str:
+    return "永久" if expire_month == "999912" else f"{expire_month[:4]}-{expire_month[4:]}"
+
+
+def _license_type(expire_month: str) -> str:
+    return "永久" if expire_month == "999912" else "月付/试用"
+
+
+def _monthly_growth(users: list[dict]) -> pd.DataFrame:
+    end = pd.Period(datetime.now().strftime("%Y-%m"), freq="M")
+    months = [str(m) for m in pd.period_range(end=end, periods=6, freq="M")]
+    rows = []
+    for month in months:
+        rows.append({
+            "月份": month,
+            "新增用户": sum(1 for u in users if (u.get("created_at") or "")[:7] == month),
+        })
+    return pd.DataFrame(rows)
+
+
+def _require_admin():
+    st.markdown(
+        """
+        <div class="ta-page-header">
+            <div class="ta-eyebrow">ADMIN</div>
+            <h1 class="ta-page-title">管理员权限</h1>
+            <div class="ta-page-subtitle">请通过统一登录入口使用管理员账号进入后台。</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.warning("当前会话不是管理员。请使用管理员账号从统一入口登录。")
+    st.page_link("pages/activate.py", label="前往登录", use_container_width=True)
     st.stop()
 
+
+if not is_admin():
+    _require_admin()
+
 st.markdown(
-    '<div style="font-size:1.4rem;font-weight:800;color:#f5f1eb;margin-bottom:1rem;">🛡️ 管理员看板</div>',
+    """
+    <div class="ta-page-header">
+        <div class="ta-eyebrow">USER OPERATIONS</div>
+        <h1 class="ta-page-title">管理员看板</h1>
+        <div class="ta-page-subtitle">集中查看用户授权、生成激活码、重置设备绑定和发送通知邮件。</div>
+    </div>
+    """,
     unsafe_allow_html=True,
 )
 
 users_data = list_users()
 active_users = [u for u in users_data if u["active"]]
 perm_users = [u for u in active_users if u["expire_month"] == "999912"]
-monthly_users = [u for u in active_users if u["expire_month"] != "999912"]
-today = datetime.now().strftime("%Y-%m-%d")
+supporter_users = [u for u in active_users if u.get("plan") == "supporter"]
+pro_users = [u for u in active_users if u.get("plan", "pro") == "pro"]
 this_month = datetime.now().strftime("%Y-%m")
-new_this_month = [u for u in users_data if u.get("created_at", "")[:7] == this_month]
-
-# ── KPI Row ──────────────────────────────────────────────────────────────────────
+new_this_month = [u for u in users_data if (u.get("created_at") or "")[:7] == this_month]
 
 k1, k2, k3, k4, k5, k6 = st.columns(6)
 k1.metric("总用户", len(users_data))
 k2.metric("活跃", len(active_users), delta=f"+{len(new_this_month)}本月")
-k3.metric("永久", len(perm_users))
-k4.metric("月付", len(monthly_users))
-k5.metric("月收入(估)", f"¥{len(monthly_users)*99 + len(perm_users)*299:,}")
-k6.metric("今日", today)
+k3.metric("支持者版", len(supporter_users))
+k4.metric("Pro 版", len(pro_users))
+k5.metric("永久支持", len(perm_users))
+k6.metric("今日", datetime.now().strftime("%Y-%m-%d"))
 
 st.markdown("---")
 
-# ── Tabs ─────────────────────────────────────────────────────────────────────────
-
-tab1, tab2, tab3, tab4 = st.tabs(["👥 用户管理", "🔑 激活码", "📧 邮件群发", "📊 统计"])
+tab1, tab2, tab3, tab4 = st.tabs(["👥 用户管理", "🔑 激活码", "📧 邮件", "📊 统计"])
 
 with tab1:
+    q_col, status_col, plan_col, type_col = st.columns([2, 1, 1, 1])
+    query = q_col.text_input("搜索用户", placeholder="用户名或邮箱")
+    status_filter = status_col.selectbox("状态", ["全部", "活跃", "禁用"])
+    plan_filter = plan_col.selectbox("套餐", ["全部", *PLAN_LABELS.values()])
+    type_filter = type_col.selectbox("类型", ["全部", "永久", "月付/试用"])
+
+    filtered_users = users_data
+    if query.strip():
+        needle = query.strip().lower()
+        filtered_users = [u for u in filtered_users if needle in u["user_name"].lower()]
+    if status_filter == "活跃":
+        filtered_users = [u for u in filtered_users if u["active"]]
+    elif status_filter == "禁用":
+        filtered_users = [u for u in filtered_users if not u["active"]]
+    if plan_filter != "全部":
+        filtered_users = [u for u in filtered_users if plan_label(u.get("plan", "pro")) == plan_filter]
+    if type_filter != "全部":
+        filtered_users = [u for u in filtered_users if _license_type(u["expire_month"]) == type_filter]
+
     if not users_data:
         st.info("暂无用户")
     else:
-        rows = []
-        for u in users_data:
-            em = u["expire_month"]
-            rows.append({
-                "ID": u["id"], "用户名": u["user_name"],
-                "类型": "永久" if em == "999912" else "月付",
-                "到期": "永久" if em == "999912" else f"{em[:4]}-{em[4:]}",
+        table_columns = ["ID", "用户名", "套餐", "类型", "到期", "设备", "创建", "最近检查", "状态"]
+        rows = [
+            {
+                "ID": u["id"],
+                "用户名": u["user_name"],
+                "套餐": plan_label(u.get("plan", "pro")),
+                "类型": _license_type(u["expire_month"]),
+                "到期": _format_expire(u["expire_month"]),
                 "设备": f'{u["device_count"]}/{u["max_devices"]}',
-                "创建": u["created_at"][:10] if u.get("created_at") else "",
-                "状态": "✅" if u["active"] else "❌",
-            })
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+                "创建": (u.get("created_at") or "")[:10],
+                "最近检查": (u.get("last_check") or "")[:16],
+                "状态": "启用" if u["active"] else "禁用",
+            }
+            for u in filtered_users
+        ]
+        st.dataframe(pd.DataFrame(rows, columns=table_columns), use_container_width=True, hide_index=True)
+        if not filtered_users:
+            st.info("没有匹配的用户，快速操作仍可选择全部用户。")
 
-        # Quick actions
-        st.markdown("---")
-        col_a, col_b, col_c = st.columns(3)
-        action_user = col_a.selectbox("操作对象", [u["user_name"] for u in users_data])
+        action_options = [u["user_name"] for u in filtered_users] or [u["user_name"] for u in users_data]
+        st.markdown('<div class="ta-panel-title">快速操作</div>', unsafe_allow_html=True)
+        col_a, col_b, col_c = st.columns([2, 1, 1])
+        action_user = col_a.selectbox("操作对象", action_options)
         info = next((u for u in users_data if u["user_name"] == action_user), None)
         if info:
             col_b.metric("设备", f'{info["device_count"]}/{info["max_devices"]}')
-            col_c.metric("到期", "永久" if info["expire_month"] == "999912" else info["expire_month"])
+            col_c.metric("到期", _format_expire(info["expire_month"]))
 
         ca, cb, cc = st.columns(3)
-        if ca.button("🔄 切换启用/禁用", use_container_width=True):
-            update_license_status(action_user, not info["active"])
-            st.rerun()
-        if cb.button("🗑️ 重置设备绑定", use_container_width=True):
-            import sqlite3
-            from tradingagents.auth.user_db import DB_PATH
-            db = sqlite3.connect(str(DB_PATH))
-            row = db.execute("SELECT key_hash FROM licenses WHERE user_name=?", (action_user,)).fetchone()
-            db.close()
-            if row:
-                reset_devices(row[0])
-                st.success(f"已重置 {action_user} 设备")
+        if ca.button("切换启用/禁用", use_container_width=True, disabled=not info):
+            if update_license_status(action_user, not info["active"]):
+                st.success("状态已更新")
                 st.rerun()
+            else:
+                st.error("未找到用户")
+        if cb.button("重置设备绑定", use_container_width=True, disabled=not info):
+            key_hash = get_license_key_hash_for_user(action_user)
+            if key_hash:
+                reset_devices(key_hash)
+                st.success(f"已重置 {action_user} 的设备绑定")
+                st.rerun()
+            else:
+                st.error("未找到该用户的激活码哈希")
+        if cc.button("刷新列表", use_container_width=True):
+            st.rerun()
 
 with tab2:
-    st.markdown("#### 生成激活码")
-    c1, c2, c3, c4 = st.columns(4)
-    gen_name = c1.text_input("用户名", key="gen_name")
-    gen_type = c2.selectbox("类型", ["月付", "永久"], key="gen_type")
-    gen_expire = c3.text_input("到期年月", "202712", key="gen_expire",
-                                help="月付时填写YYYYMM，永久忽略")
-    gen_dev = c4.number_input("设备数", 1, 5, 1, key="gen_dev")
+    st.markdown('<div class="ta-panel-title">生成激活码</div>', unsafe_allow_html=True)
+    c1, c2, c3, c4, c5 = st.columns([1.4, 0.9, 0.8, 0.9, 0.7])
+    gen_name = c1.text_input("用户名/邮箱", key="gen_name")
+    plan_options = list(PLAN_LABELS)
+    gen_plan = c2.selectbox(
+        "套餐",
+        plan_options,
+        index=1,
+        format_func=lambda value: PLAN_LABELS[value],
+        key="gen_plan",
+    )
+    gen_type = c3.selectbox("类型", ["月付/试用", "永久"], key="gen_type")
+    gen_expire = c4.text_input("到期年月", datetime.now().strftime("%Y") + "12", key="gen_expire")
+    gen_dev = c5.number_input("设备数", 1, 5, 1, key="gen_dev")
 
-    col_k, col_m = st.columns([3, 1])
-    if col_k.button("🔑 生成激活码", type="primary", use_container_width=True):
-        if not gen_name:
-            st.error("请输入用户名")
-        else:
-            exp = "999912" if gen_type == "永久" else gen_expire
-            key = generate_license_key(gen_name, exp)
+    if st.button("生成激活码", type="primary", use_container_width=True):
+        try:
+            normalized_name = normalize_user_name(gen_name)
+            exp = "999912" if gen_type == "永久" else validate_expire_month(gen_expire)
+            key = generate_license_key(normalized_name, exp, plan=gen_plan)
             key_hash = hashlib.sha256(key.encode()).hexdigest()
-            if add_license(gen_name, key_hash, exp, gen_dev):
-                st.success("✅ 激活码已生成，请复制发给用户")
+            created = add_license(normalized_name, key_hash, exp, int(gen_dev), plan=gen_plan)
+        except ValueError as exc:
+            st.error(str(exc))
+        else:
+            if created:
+                st.success("激活码已生成")
                 st.code(key, language="")
                 st.session_state["last_key"] = key
-                st.session_state["last_user"] = gen_name
+                st.session_state["last_user"] = normalized_name
                 st.session_state["last_expire"] = exp
             else:
-                st.error("用户已存在")
+                st.error("用户或激活码已存在")
 
-    # Send email
     last_key = st.session_state.get("last_key", "")
     if last_key:
+        st.markdown('<div class="ta-panel-title">发送激活码</div>', unsafe_allow_html=True)
         col_e, col_s = st.columns([3, 1])
-        email_addr = col_e.text_input("用户邮箱(可选)", key="send_email")
-        if col_s.button("📧 发送", use_container_width=True) and email_addr:
+        email_addr = col_e.text_input("用户邮箱", key="send_email")
+        if col_s.button("发送", use_container_width=True) and email_addr:
             from tradingagents.auth.email_service import send_activation_key
-            if send_activation_key(email_addr, st.session_state.get("last_user", ""),
-                                    last_key, st.session_state.get("last_expire", "999912")):
+
+            if send_activation_key(
+                email_addr,
+                st.session_state.get("last_user", ""),
+                last_key,
+                st.session_state.get("last_expire", "999912"),
+            ):
                 st.success("已发送")
             else:
                 st.warning("发送失败")
 
 with tab3:
-    st.markdown("#### 邮件群发")
+    st.markdown('<div class="ta-panel-title">邮件工具</div>', unsafe_allow_html=True)
+    etype = st.selectbox("模板", ["验证码测试", "每日简报", "欢迎邮件"])
 
-    etype = st.selectbox("模板", ["验证码(测试)", "每日简报", "欢迎邮件"])
-
-    if etype == "验证码(测试)":
-        test_email = st.text_input("测试邮箱", "zwiilliamz007@163.com")
-        if st.button("📧 发送测试验证码", use_container_width=True):
+    if etype == "验证码测试":
+        test_email = st.text_input("测试邮箱", "")
+        if st.button("发送测试验证码", use_container_width=True):
             from tradingagents.auth.email_service import send_verification_code
+
             r = send_verification_code(test_email)
-            if r["success"]:
-                st.success(r["message"])
-            else:
-                st.warning(r["message"])
+            st.success(r["message"]) if r["success"] else st.warning(r["message"])
 
     elif etype == "每日简报":
-        if st.button("📧 发送每日简报(测试)", use_container_width=True):
-            from tradingagents.dataflows.a_stock import get_market_indices, get_market_breadth
+        target_email = st.text_input("收件邮箱", "")
+        if st.button("发送每日简报测试", use_container_width=True):
             from tradingagents.auth.email_service import send_daily_briefing
+            from tradingagents.dataflows.a_stock import get_market_breadth, get_market_indices
+
             indices = get_market_indices()
             breadth = get_market_breadth()
             brief = {
-                "indices": [{"name": i["name"], "price": i["price"],
-                              "change_pct": i["change_pct"]} for i in indices[:5]],
-                "up": breadth.get("total_up", 0), "dn": breadth.get("total_down", 0),
-                "nb": 0, "hot": "请打开软件查看完整数据",
+                "indices": [
+                    {"name": i["name"], "price": i["price"], "change_pct": i["change_pct"]}
+                    for i in indices[:5]
+                ],
+                "up": breadth.get("total_up", 0),
+                "dn": breadth.get("total_down", 0),
+                "nb": 0,
+                "hot": "请打开软件查看完整数据",
             }
-            if send_daily_briefing("zwiilliamz007@163.com", brief):
+            if send_daily_briefing(target_email, brief):
                 st.success("每日简报已发送")
+            else:
+                st.warning("发送失败")
 
     elif etype == "欢迎邮件":
         w_email = st.text_input("邮箱地址")
         w_name = st.text_input("用户名")
-        if st.button("📧 发送欢迎邮件", use_container_width=True):
+        if st.button("发送欢迎邮件", use_container_width=True):
             from tradingagents.auth.email_service import send_welcome
+
             if send_welcome(w_email, w_name):
                 st.success("欢迎邮件已发送")
+            else:
+                st.warning("发送失败")
 
 with tab4:
-    st.markdown("#### 数据概览")
-    # User growth chart (mock)
-    months = ["1月", "2月", "3月", "4月", "5月", "6月"]
-    growth = [0, 0, 0, 0, len(users_data), len(users_data)]
-    growth_df = pd.DataFrame({"月份": months, "用户数": growth})
-    st.bar_chart(growth_df.set_index("月份"))
-
-    st.metric("赞赏总收入(估算)", f"¥{len(monthly_users)*99 + len(perm_users)*299:,}")
+    st.markdown('<div class="ta-panel-title">数据概览</div>', unsafe_allow_html=True)
+    growth_df = _monthly_growth(users_data)
+    if users_data:
+        st.bar_chart(growth_df.set_index("月份"))
+    else:
+        st.info("暂无用户增长数据")
+    s1, s2, s3 = st.columns(3)
+    s1.metric("本月新增", len(new_this_month))
+    s2.metric("活跃占比", f"{(len(active_users) / len(users_data) * 100):.1f}%" if users_data else "0.0%")
+    s3.metric("有效授权", len(active_users))
 
 st.markdown("---")
-if st.button("🚪 退出登录", use_container_width=True):
-    st.session_state["admin_authed"] = False
+if st.button("退出登录", use_container_width=True):
+    sign_out()
     st.rerun()

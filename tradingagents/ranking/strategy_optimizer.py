@@ -59,10 +59,22 @@ ADVANCED_QUANT_CATEGORY_FACTORS = {
     "size": ["adv_vol_stability", "adv_amihud_liquidity", "price_stability"],
 }
 
+# A compact factor map for classic, independently published asset-pricing ideas.
+# The strategies sharing this map are prepared once during preset comparison,
+# then express different research hypotheses through their five dimension weights.
+RESEARCH_CLASSICS_CATEGORY_FACTORS = {
+    "value_quality": ["earnings_yield", "quality_spread", "quality_value", "roe_trend"],
+    "momentum": ["mom_12m1m", "mom_6m", "price_channel", "path_alpha", "momentum_quality"],
+    "money_flow": ["volume_price_trend", "turnover_mom", "fund_tech_confirm"],
+    "sentiment": ["intraday_reversal", "boll_position", "rsi_signal"],
+    "size": ["downside_risk", "sortino_ratio", "tail_risk", "max_drawdown_1y", "price_stability"],
+}
+
 FACTOR_MAP_PRESETS = {
     "default": DEFAULT_CATEGORY_FACTORS,
     "alpha191_style": ALPHA191_CATEGORY_FACTORS,
     "advanced_quant": ADVANCED_QUANT_CATEGORY_FACTORS,
+    "research_classics": RESEARCH_CLASSICS_CATEGORY_FACTORS,
 }
 
 OPTIMIZED_FILE = Path.home() / ".tradingagents" / "optimized_strategies.json"

@@ -53,10 +53,13 @@ def _render_llm_config():
 
 
 def render_sidebar():
-    from tradingagents.auth import get_license_status, is_premium
+    from tradingagents.auth import get_license_status
+    from web.auth_session import current_user, is_admin, sign_out
 
     license_status = get_license_status()
-    premium = license_status.get("valid", False)
+    auth_user = current_user()
+    admin = is_admin()
+    premium = admin or license_status.get("valid", False)
 
     st.markdown(
         '<div style="text-align:center;margin-bottom:0.5rem;">'
@@ -66,21 +69,28 @@ def render_sidebar():
     )
 
     status_color = "#22c55e" if premium else "#f97316"
+    status_text = f"🛡️ 管理员: {auth_user['user_name']}" if admin else license_status.get("display", "🔒 免费版")
     st.markdown(
         f'<div style="text-align:center;margin-bottom:0.3rem;font-size:0.8rem;color:{status_color}">'
-        f'{license_status.get("display", "🔒 免费版")}</div>',
+        f'{status_text}</div>',
         unsafe_allow_html=True,
     )
-    if not premium:
-        st.page_link("pages/activate.py", label="🔑 赞赏激活", use_container_width=True)
-    else:
+    st.page_link("pages/activate.py", label="🔑 账号 / 激活", use_container_width=True)
+    if admin:
         st.page_link("pages/admin.py", label="🛡️ 管理员", use_container_width=True)
+    if auth_user and st.button("退出登录", key="sidebar_logout", use_container_width=True):
+        sign_out()
+        st.rerun()
+
+    if st.button("♥ 支持开源计划", key="nav_support_plan", use_container_width=True):
+        st.switch_page("pages/12_Support_Open_Source.py")
 
     st.markdown("---")
     st.caption("📋 股票功能")
-    premium_pages = {"深度分析", "AI 荐股", "因子引擎", "股票监控", "模拟盘", "基金中心"}
+    premium_pages = {"深度分析", "AI 荐股", "因子引擎", "股票监控", "模拟盘", "基金中心", "每日投研报告"}
     stock_nav_items = [
         ("📈 深度分析", "app.py", "深度分析"),
+        ("◫ 每日投研报告", "pages/13_Daily_Reports.py", "每日投研报告"),
         ("🏠 大盘看盘", "pages/1_Market_Dashboard.py", "大盘看盘"),
         ("📊 板块分析", "pages/2_Sector_Board.py", "板块分析"),
         ("🔍 一键选股", "pages/3_Stock_Screener.py", "一键选股"),
