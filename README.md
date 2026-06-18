@@ -1,117 +1,150 @@
-<h1 align="center">A股量化系统</h1>
+# TradingAgents-Astock
 
-<p align="center">
-  AI驱动的A股量化投研平台<br>
-  97因子 · 7Agent协作 · 回测验证 · 模拟交易<br>
-  <b>开源免费使用，赞赏解锁全部功能</b>
-</p>
+面向 A 股的多 Agent 投研框架，基于
+[TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents)
+深度特化。系统通过市场、情绪、新闻、基本面、政策、游资和解禁 7 个分析角色，结合多空辩论与风险评估生成研究报告。
 
-<p align="center">
-  <b>⚠️ 免责声明：本项目仅供学习研究与技术演示，不构成任何投资建议。</b>
-</p>
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/)
+[![License](https://img.shields.io/badge/License-Apache--2.0-green)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.2.7-orange)](CHANGELOG.md)
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Python-3.10+-blue" alt="Python"/>
-  <img src="https://img.shields.io/badge/License-Apache_2.0-green" alt="License"/>
-  <img src="https://img.shields.io/badge/平台-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey" alt="Platform"/>
-</p>
+> 本项目仅用于学习、研究和技术演示，不构成证券投资咨询或任何收益承诺。市场有风险，决策需独立判断。
 
----
+![Web UI](assets/web-ui-welcome.png)
+
+## 主要能力
+
+- 7 个 A 股投研 Analyst：市场、情绪、新闻、基本面、政策、游资、解禁。
+- Bull/Bear 多空辩论、研究经理决策和三方风险辩论。
+- A 股行情、财务、资金流、龙虎榜、板块、资讯等直连数据源。
+- 多因子选股、策略回测、模拟交易、股票监控和 PDF 报告。
+- 中文股票名称自动解析为 6 位代码。
+- Streamlit Web UI 和命令行两种使用方式。
 
 ## 快速开始
 
-### 1. 下载代码
+### 1. 获取代码
+
 ```bash
-git clone https://github.com/YOUR_USERNAME/agu-quant.git
-cd agu-quant
+git clone https://github.com/simonlin1212/TradingAgents-astock.git
+cd TradingAgents-astock
 ```
 
-### 2. 安装依赖
+### 2. 安装
+
 ```bash
 pip install -e .
 ```
 
-### 3. 配置API Key
-复制 `.env.example` 为 `.env`，填入 DeepSeek API Key：
+如需使用 Google 模型：
+
+```bash
+pip install -e ".[google]"
 ```
-DEEPSEEK_API_KEY=sk-xxxxx
+
+### 3. 配置模型
+
+复制 `.env.example` 为 `.env`，填入所选模型服务的 API Key。例如：
+
+```env
+DEEPSEEK_API_KEY=sk-your-key
 ```
-> 获取免费/低价 Key: [platform.deepseek.com](https://platform.deepseek.com)
 
 ### 4. 启动
-```bash
-# 方式1: 命令行
-streamlit run web/app.py --server.port 8501
-
-# 方式2: Windows双击 启动.bat
-```
-浏览器打开 `http://localhost:8501`
-
----
-
-## 功能总览
-
-| 功能 | 说明 | 免费 |
-|------|------|:---:|
-| 大盘看盘 | 实时指数、涨跌家数、北向资金、热门板块/个股 | ✅ |
-| 板块分析 | 90行业+50概念排名，双色Treemap热力图 | ✅ |
-| 一键选股 | PE/PB/ROE/市值多条件筛选 | ✅ |
-| AI荐股 | 15套策略·97因子评分·DeepSeek点评 | 🔒 |
-| 因子引擎 | 8大类97因子·回测·IC/IR分析·AI权重优化 | 🔒 |
-| 深度分析 | 7Agent协作·多空辩论·风控决策 | 🔒 |
-| 股票监控 | 多周期K线·技术指标·买卖点标记 | 🔒 |
-| 模拟盘 | A股真实规则·T+1·涨跌停·行情刷新 | 🔒 |
-| PDF导出 | 深度分析报告下载 | 🔒 |
-
-> 🔒 = 赞赏解锁 (99元/月 或 299元/永久)
-
----
-
-## 系统截图
-
-<p align="center">
-  <img src="https://via.placeholder.com/800x450/f97316/ffffff?text=大盘看盘" width="400"/>
-  <img src="https://via.placeholder.com/800x450/15803d/ffffff?text=板块热力图" width="400"/>
-  <img src="https://via.placeholder.com/800x450/7f1d1d/ffffff?text=AI荐股" width="400"/>
-  <img src="https://via.placeholder.com/800x450/1a1a2e/ffffff?text=因子引擎" width="400"/>
-</p>
-
----
-
-## 赞赏支持
-
-| 套餐 | 价格 | 说明 |
-|------|------|------|
-| 免费版 | ¥0 | 大盘看盘·板块分析·基础选股 |
-| 月付赞赏 | ¥99/月 | 全部功能解锁 |
-| 永久买断 | ¥299 | 全部功能·永久有效·2台设备 |
-
-**赞赏流程**：微信 `agu_quant` 或 Telegram `@agu_quant_bot` 转账 → 获取激活码 → 软件内激活
-
-**邮箱注册**：启动后在「赞赏激活」页面输入邮箱 → 获取7天免费试用
-
----
-
-## 技术栈
-
-Python · Streamlit · Plotly · LangChain/LangGraph · DeepSeek · mootdx · 东方财富Push2 · backtrader · Resend
-
----
-
-## 发布到GitHub
 
 ```bash
-git add .
-git commit -m "v1.0: A股量化系统"
-git push origin main
+tradingagents-web
 ```
 
-## 网页下载
+也可以直接运行：
 
-1. GitHub Release: 打包 `dist/` 目录为 zip 上传
-2. 或使用网盘: 上传到百度网盘/蓝奏云，分享链接
-3. 个人网站: 用 GitHub Pages 建一个简单的下载页
+```bash
+streamlit run web/app.py
+```
 
----
+Windows 用户还可以双击 `启动.bat`。
 
-<p align="center"><b>⭐ 如果这个项目对你有帮助，请给一个Star！</b></p>
+## 每日投研报告
+
+先在 Web 侧边栏打开“每日投研报告”，保存 6 位股票代码和报告模板。立即生成：
+
+```bash
+python -m tradingagents.reporting.daily --tickers 600519,000001 --template brief
+```
+
+Windows 定时任务：
+
+```powershell
+.\scripts\install_daily_task.ps1 -Time "18:30" -Tickers "600519,000001" -Template brief
+```
+
+模板包括 `brief`、`full` 和 `risk`，报告默认保存到 `~/.tradingagents/daily_reports/`。自动运行会产生模型调用费用。
+
+## 数据源
+
+项目的数据层不依赖第三方金融数据库 SDK，主要通过 mootdx 与公开 HTTP 接口获取数据：
+
+| 数据源 | 主要用途 |
+|---|---|
+| mootdx | K 线、财务快照、F10 文本 |
+| 腾讯财经 | PE、PB、市值、换手率 |
+| 东方财富 | 行情、资金流、龙虎榜、板块、解禁、新闻 |
+| 新浪财经 | 历史 K 线、财务报表 |
+| 同花顺 | 一致预期、热股题材 |
+| 财联社 | 全球财经快讯 |
+| 百度股市通 | 概念板块归属 |
+
+公开接口可能变化或限流，请勿将单一数据源结果视为交易依据。
+
+## 商业支持
+
+核心源码继续按 Apache 2.0 开放。项目可以通过官方构建、托管服务、自动化报告、模板、技术支持和私有部署获得持续维护资金，而不是承诺投资收益。
+
+### 支持开源计划
+
+| 方案 | 建议价格 | 主要权益 |
+|---|---:|---|
+| 社区版 | 免费 | GitHub 源码、本地运行、自备模型 Key、社区支持 |
+| 支持者版 | 99 元/年 | Windows 一键包、国内镜像、稳定更新、配置指南和模板包 |
+| Pro 版 | 39 元/月或 299 元/年 | 每日投研报告、定时任务、报告模板和优先支持 |
+| 私有部署 | 2999 元起 | 部署、模型/数据源接入、定制 Agent 和培训 |
+
+购买入口仅在应用内“支持开源计划”页面通过真实环境配置展示。未看到官方入口时，请勿向第三方账户付款。
+
+当前商业化设计和上线前安全清单见
+[商业化落地方案](docs/COMMERCIALIZATION.md)。正式购买入口尚未开放，请勿向非官方账户付款。
+
+需要真实账号和外部环境完成的事项见 [商业化上线清单](docs/COMMERCIALIZATION_LAUNCH_CHECKLIST.md)。
+
+## 开发与测试
+
+```bash
+python -m pytest tests/ -v
+```
+
+Web UI 本地验证：
+
+```bash
+streamlit run web/app.py
+```
+
+## 私有部署
+
+复制 `.env.enterprise.example` 为 `.env.private`，配置管理员和至少一个模型 API Key，然后运行：
+
+```powershell
+.\scripts\start_private.ps1 -EnvFile .env.private
+```
+
+详细交付范围、安全要求和验收标准见 [私有部署服务](docs/PRIVATE_DEPLOYMENT.md)。定制 Agent 可使用 [需求说明模板](docs/CUSTOM_AGENT_BRIEF.md) 明确数据、工具、权限和输出契约。
+
+## 项目文档
+
+- [更新日志](CHANGELOG.md)
+- [与上游的差异](CHANGES_FROM_UPSTREAM.md)
+- [商业化落地方案](docs/COMMERCIALIZATION.md)
+- [Issue 归档](issues/)
+
+## 许可证
+
+项目采用 [Apache License 2.0](LICENSE)。第三方数据与模型服务仍受各自条款约束。

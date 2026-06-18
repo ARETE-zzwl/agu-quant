@@ -39,6 +39,8 @@ if filters is not None:
         )
         st.session_state["screener_results"] = stocks
         st.session_state["screener_total"] = total
+        if not stocks:
+            st.warning("行情源暂时没有返回可用股票数据，请稍后重试或缩小筛选范围。")
 
 stocks_data = st.session_state.get("screener_results")
 total_count = st.session_state.get("screener_total", 0)

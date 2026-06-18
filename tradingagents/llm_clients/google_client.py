@@ -1,17 +1,30 @@
 from typing import Any, Optional
 
-from langchain_google_genai import ChatGoogleGenerativeAI
+try:
+    from langchain_google_genai import ChatGoogleGenerativeAI
+except ModuleNotFoundError as exc:  # pragma: no cover - exercised by import-only tests
+    if exc.name != "langchain_google_genai":
+        raise
+    ChatGoogleGenerativeAI = None
 
 from .base_client import BaseLLMClient, normalize_content
 from .validators import validate_model
 
 
-class NormalizedChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
+class NormalizedChatGoogleGenerativeAI(ChatGoogleGenerativeAI or object):
     """ChatGoogleGenerativeAI with normalized content output.
 
     Gemini 3 models return content as list of typed blocks.
     This normalizes to string for consistent downstream handling.
     """
+
+    def __init__(self, *args, **kwargs):
+        if ChatGoogleGenerativeAI is None:
+            raise ImportError(
+                "Google model support requires the optional dependency: "
+                'pip install -e ".[google]"'
+            )
+        super().__init__(*args, **kwargs)
 
     def invoke(self, input, config=None, **kwargs):
         return normalize_content(super().invoke(input, config, **kwargs))

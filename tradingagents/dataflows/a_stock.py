@@ -2022,7 +2022,6 @@ def get_market_indices() -> list[dict]:
 
     Uses push2 clist API with fs=m:1+t:2,m:1+t:12 (指数板块).
     """
-    url = "https://push2.eastmoney.com/api/qt/clist/get"
     params = {
         "pn": "1",
         "pz": "20",
@@ -2033,8 +2032,10 @@ def get_market_indices() -> list[dict]:
         "fs": _MARKET_INDICES_FS,
         "fields": _MARKET_INDICES_FIELDS,
     }
-    r = _requests.get(url, params=params, headers={"User-Agent": _UA}, timeout=15)
-    data = r.json().get("data", {})
+    payload = _fetch_push2_clist(params)
+    data = payload.get("data") or {}
+    if not isinstance(data, dict):
+        data = {}
     items = data.get("diff", [])
 
     results: list[dict] = []
@@ -2146,6 +2147,41 @@ _MARKET_FS = {
 }
 
 
+_PUSH2_HEADERS = {
+    "User-Agent": _UA,
+    "Referer": "https://quote.eastmoney.com/center/gridlist.html",
+    "Accept": "application/json,text/plain,*/*",
+    "Connection": "close",
+}
+
+
+def _fetch_push2_clist(params: dict, *, retries: int = 3, timeout: int = 10) -> dict:
+    last_error: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            resp = _requests.get(
+                "https://push2.eastmoney.com/api/qt/clist/get",
+                params=params,
+                headers=_PUSH2_HEADERS,
+                timeout=timeout,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+            if not isinstance(payload, dict):
+                raise ValueError("push2 returned a non-object payload")
+            return payload
+        except (_requests.RequestException, ValueError) as exc:
+            last_error = exc
+            logger.warning(
+                "Eastmoney push2 clist attempt %s/%s failed: %s",
+                attempt,
+                retries,
+                exc,
+            )
+    logger.warning("Eastmoney push2 clist unavailable after %s attempts: %s", retries, last_error)
+    return {"data": {"total": 0, "diff": []}}
+
+
 def screen_stocks(
     market: str = "all",
     pe_max: float = None,
@@ -2168,7 +2204,6 @@ def screen_stocks(
     fs = _MARKET_FS.get(market, _MARKET_FS["all"])
     fields_list = list(_PUSH2_FIELDS_MAP.keys())
 
-    url = "https://push2.eastmoney.com/api/qt/clist/get"
     params = {
         "pn": str(page),
         "pz": str(min(page_size, 200)),
@@ -2180,8 +2215,10 @@ def screen_stocks(
         "fields": ",".join(fields_list),
         "fid": sort_by,
     }
-    r = _requests.get(url, params=params, headers={"User-Agent": _UA}, timeout=15)
-    data = r.json().get("data", {})
+    payload = _fetch_push2_clist(params)
+    data = payload.get("data") or {}
+    if not isinstance(data, dict):
+        data = {}
     total = data.get("total", 0)
     items = data.get("diff", [])
 

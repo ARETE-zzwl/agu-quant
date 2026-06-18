@@ -5,13 +5,15 @@ import os
 import random
 import time
 from datetime import datetime
+from html import escape
 from pathlib import Path
 
 import resend
 
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
-FROM_EMAIL = os.getenv("FROM_EMAIL", "A股量化 <noreply@zzwl.asia>")
+FROM_EMAIL = os.getenv("FROM_EMAIL", "")
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "")
+SUPPORT_CONTACT = os.getenv("TA_SUPPORT_CONTACT", "")
 
 CODE_DIR = Path.home() / ".tradingagents" / "license"
 CODE_DIR.mkdir(parents=True, exist_ok=True)
@@ -39,7 +41,7 @@ def _clean_expired():
 
 def send_verification_code(email: str) -> dict:
     """Send a 6-digit verification code to user's email. Returns {success, message}."""
-    if not RESEND_API_KEY:
+    if not RESEND_API_KEY or not FROM_EMAIL:
         return {"success": False, "message": "邮件服务未配置"}
 
     resend.api_key = RESEND_API_KEY
@@ -96,7 +98,7 @@ def verify_code(email: str, code: str) -> dict:
 
 def send_activation_key(email: str, user_name: str, key: str, expire_month: str) -> bool:
     """Send activation key to user after payment."""
-    if not RESEND_API_KEY:
+    if not RESEND_API_KEY or not FROM_EMAIL:
         return False
 
     resend.api_key = RESEND_API_KEY
@@ -130,7 +132,7 @@ def send_activation_key(email: str, user_name: str, key: str, expire_month: str)
 
 def notify_admin_new_user(email: str):
     """Notify admin of new registration."""
-    if not ADMIN_EMAIL or not RESEND_API_KEY:
+    if not ADMIN_EMAIL or not RESEND_API_KEY or not FROM_EMAIL:
         return
     resend.api_key = RESEND_API_KEY
     try:
@@ -146,9 +148,14 @@ def notify_admin_new_user(email: str):
 
 def send_expiry_reminder(email: str, user_name: str, days_left: int) -> bool:
     """Send expiry reminder N days before license expires."""
-    if not RESEND_API_KEY:
+    if not RESEND_API_KEY or not FROM_EMAIL:
         return False
     resend.api_key = RESEND_API_KEY
+    support_message = (
+        f"官方联系方式：{escape(SUPPORT_CONTACT)}"
+        if SUPPORT_CONTACT
+        else "请在应用内打开「支持开源计划」页面查看续费方式。"
+    )
     try:
         resend.Emails.send({
             "from": FROM_EMAIL,
@@ -158,8 +165,8 @@ def send_expiry_reminder(email: str, user_name: str, days_left: int) -> bool:
             <div style="font-family: sans-serif; max-width: 500px; margin: 0 auto;">
                 <h2 style="color: #f97316;">赞赏即将到期</h2>
                 <p>{user_name} 您好，您的赞赏服务将在 <b>{days_left}天后</b> 到期。</p>
-                <p>续费赞赏请发送 99元（月付）或 299元（永久）至：</p>
-                <p>微信: agu_quant | Telegram: @agu_quant_bot</p>
+                <p>如需续费支持者版或 Pro 版，请通过官方支持入口办理。</p>
+                <p>{support_message}</p>
             </div>
             """
         })
@@ -172,7 +179,7 @@ def send_expiry_reminder(email: str, user_name: str, days_left: int) -> bool:
 
 
 def send_welcome(email: str, user_name: str) -> bool:
-    if not RESEND_API_KEY:
+    if not RESEND_API_KEY or not FROM_EMAIL:
         return False
     resend.api_key = RESEND_API_KEY
     try:
@@ -187,7 +194,7 @@ def send_welcome(email: str, user_name: str) -> bool:
                 <ol><li>下载代码并安装依赖</li><li>配置 DeepSeek API Key</li><li>启动: streamlit run web/app.py</li></ol>
                 <h3>主要功能</h3>
                 <ul><li>AI荐股 — 12套策略评分</li><li>因子引擎 — 97因子回测</li><li>模拟盘 — A股真实规则</li><li>深度分析 — 7Agent协作</li></ul>
-                <p style="color:#888;margin-top:16px;">7天试用，赞赏: 99元/月 或 299元/永久</p>
+                <p style="color:#888;margin-top:16px;">需要官方安装包、自动日报或持续支持时，可在应用内查看支持开源计划。</p>
             </div>"""
         })
         return True
@@ -197,7 +204,7 @@ def send_welcome(email: str, user_name: str) -> bool:
 
 def send_daily_briefing(email: str, briefing: dict) -> bool:
     """Send daily market briefing with indices, breadth, hot sectors."""
-    if not RESEND_API_KEY:
+    if not RESEND_API_KEY or not FROM_EMAIL:
         return False
     resend.api_key = RESEND_API_KEY
     today = __import__('datetime').datetime.now().strftime("%Y-%m-%d")
@@ -227,7 +234,7 @@ def send_daily_briefing(email: str, briefing: dict) -> bool:
 
 def send_price_alert(email: str, code: str, name: str, price: float, target: float, alert_type: str) -> bool:
     """Price alert when stock hits key levels: support/resistance/stop_loss/take_profit."""
-    if not RESEND_API_KEY:
+    if not RESEND_API_KEY or not FROM_EMAIL:
         return False
     resend.api_key = RESEND_API_KEY
     labels = {"support":"触及支撑","resistance":"触及压力","stop_loss":"触发止损","take_profit":"达到止盈"}
@@ -250,7 +257,7 @@ def send_price_alert(email: str, code: str, name: str, price: float, target: flo
 
 def send_weekly_report(email: str, report: dict) -> bool:
     """Weekly portfolio performance report."""
-    if not RESEND_API_KEY:
+    if not RESEND_API_KEY or not FROM_EMAIL:
         return False
     resend.api_key = RESEND_API_KEY
     c = "#ef4444" if report.get("pnl", 0) > 0 else "#22c55e"

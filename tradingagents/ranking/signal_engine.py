@@ -7,6 +7,7 @@ overlays into one action recommendation.
 
 from __future__ import annotations
 
+from functools import lru_cache
 from math import isfinite
 from typing import Any
 
@@ -39,6 +40,9 @@ CATEGORY_TO_WEIGHT_KEY = {
     "波动风险": "sentiment",
     "复合联动": "momentum",
 }
+
+CATEGORY_TO_WEIGHT_KEY["GTJA Alpha191"] = "momentum"
+CATEGORY_TO_WEIGHT_KEY["Advanced Quant"] = "momentum"
 
 
 def _clamp(v: float, lo: float, hi: float) -> float:
@@ -92,6 +96,19 @@ def _last(series: pd.Series, default: float = 0.0) -> float:
     return _safe_float(clean.iloc[-1], default) if len(clean) else default
 
 
+@lru_cache(maxsize=8)
+def _top_ic_factors(top_n: int):
+    from tradingagents.factors import get_top_by_ic
+
+    return tuple(get_top_by_ic(top_n=top_n))
+
+
+def _factor_signal_from_value(factor, value: float) -> str:
+    if factor.direction > 0:
+        return "BUY" if value > 0 else "SELL" if value < 0 else "NEUTRAL"
+    return "SELL" if value > 0 else "BUY" if value < 0 else "NEUTRAL"
+
+
 def _ret(close: pd.Series, days: int) -> float:
     if len(close) <= days:
         return 0.0
@@ -114,7 +131,7 @@ def _factor_votes(
 ) -> tuple[float, dict, list[dict]]:
     """Return factor strength in roughly [-25, 25], summary, and top rows."""
     try:
-        from tradingagents.factors import get_top_by_ic
+        factors = _top_ic_factors(30)
     except Exception:
         return 0.0, {"buy": 0, "sell": 0, "neutral": 0}, []
 
@@ -128,9 +145,11 @@ def _factor_votes(
     weight_total = 0.0
     rows: list[dict] = []
 
-    for factor in get_top_by_ic(top_n=30):
+    for factor in factors:
         try:
-            sig = factor.signal(recent)
+            series = factor.compute_series(recent)
+            val = _last(series)
+            sig = _factor_signal_from_value(factor, val)
             vote = 1 if sig == "BUY" else -1 if sig == "SELL" else 0
             key = CATEGORY_TO_WEIGHT_KEY.get(factor.category, "momentum")
             weight = weights.get(key, 0.2) * (1 + min(abs(factor.ic_value) * 10, 0.8))
@@ -142,8 +161,6 @@ def _factor_votes(
                 sell += 1
             else:
                 neutral += 1
-            series = factor.compute_series(recent)
-            val = _last(series)
             rows.append(
                 {
                     "name": factor.name,

@@ -16,7 +16,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 load_dotenv(_PROJECT_ROOT / ".env")
 
 from tradingagents.default_config import DEFAULT_CONFIG
-from web.components.common import inject_css
+from web.components.common import inject_css, require_premium_page
 from web.components.progress_panel import render_progress
 from web.components.report_viewer import render_report
 from web.components.sidebar import render_sidebar
@@ -45,6 +45,8 @@ def _build_config() -> dict:
 
 with st.sidebar:
     render_sidebar()
+
+require_premium_page("深度分析")
 
 start_req = st.session_state.pop("start_analysis", None)
 if start_req:

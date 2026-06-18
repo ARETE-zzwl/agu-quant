@@ -1,0 +1,32 @@
+services:
+  tradingagents-web:
+    build: .
+    command:
+      - streamlit
+      - run
+      - web/app.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+      - --server.headless=true
+      - --server.enableXsrfProtection=true
+      - --browser.gatherUsageStats=false
+    env_file:
+      - ${TA_ENV_FILE:-.env.private}
+    ports:
+      - "8501:8501"
+    volumes:
+      - tradingagents_private_data:/home/appuser/.tradingagents
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=5)"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+volumes:
+  tradingagents_private_data:

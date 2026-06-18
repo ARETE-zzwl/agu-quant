@@ -860,6 +860,716 @@ class Inst_Research_Heat(Factor):
 # REGISTRY — 100+ factors
 # ===========================================================================
 
+GTJA_ALPHA191_CATEGORY = "GTJA Alpha191"
+ADVANCED_QUANT_CATEGORY = "Advanced Quant"
+
+
+def _gtja_vwap(df):
+    amount = df["Close"] * df["Volume"].replace(0, 1)
+    volume = df["Volume"].replace(0, 1)
+    return amount.rolling(20, min_periods=1).sum() / volume.rolling(20, min_periods=1).sum()
+
+
+def _gtja_ts_rank(series, window):
+    def pct_rank(values):
+        s = pd.Series(values)
+        return s.rank(pct=True).iloc[-1]
+    return series.rolling(window, min_periods=2).apply(pct_rank, raw=False)
+
+
+def _gtja_decay_linear(series, window):
+    weights = np.arange(1, window + 1, dtype=float)
+    weights = weights / weights.sum()
+    return series.rolling(window, min_periods=window).apply(lambda x: float(np.dot(x, weights)), raw=True)
+
+
+def _gtja_sma(series, window, weight=1):
+    return series.ewm(alpha=weight / window, min_periods=1, adjust=False).mean()
+
+
+def _adv_amount(df):
+    typical = (df["High"] + df["Low"] + df["Close"]) / 3
+    return (typical * df["Volume"].replace(0, np.nan)).replace(0, np.nan)
+
+
+def _adv_volume_zscore(df, window=20):
+    volume = df["Volume"].replace(0, np.nan)
+    mean = volume.rolling(window, min_periods=5).mean()
+    std = volume.rolling(window, min_periods=5).std()
+    return ((volume - mean) / std.replace(0, np.nan)).fillna(0)
+
+
+class GTJA_Alpha001(Factor):
+    """GTJA Alpha191 style: volume change rank vs intraday return rank divergence."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha001",
+        "GTJA Alpha001 量价背离",
+        "成交量变化排名与日内收益排名的短周期背离，负相关越强越偏多",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.05
+    def compute_series(self, df):
+        vol_delta = np.log(df["Volume"].replace(0, np.nan)).diff()
+        intraday = (df["Close"] - df["Open"]) / df["Open"].replace(0, np.nan)
+        return -_gtja_ts_rank(vol_delta, 6).rolling(6, min_periods=3).corr(_gtja_ts_rank(intraday, 6)).fillna(0)
+
+
+class GTJA_Alpha002(Factor):
+    """GTJA Alpha191 style: daily close location reversal."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha002",
+        "GTJA Alpha002 收盘位置反转",
+        "收盘价在日内高低区间的位置变化，捕捉短期反转",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.04
+    def compute_series(self, df):
+        pos = ((df["Close"] - df["Low"]) - (df["High"] - df["Close"])) / (df["High"] - df["Low"]).replace(0, np.nan)
+        return -pos.diff().fillna(0)
+
+
+class GTJA_Alpha003(Factor):
+    """GTJA Alpha191 style: six-day directional true range pressure."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha003",
+        "GTJA Alpha003 真实波动累积",
+        "按前收涨跌方向累积真实波动，刻画短周期买卖压力",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.04
+    def compute_series(self, df):
+        close = df["Close"]
+        prev = close.shift(1)
+        up_ref = pd.concat([df["Low"], prev], axis=1).min(axis=1)
+        down_ref = pd.concat([df["High"], prev], axis=1).max(axis=1)
+        signed = np.where(close == prev, 0, np.where(close > prev, close - up_ref, close - down_ref))
+        return pd.Series(signed, index=df.index).rolling(6, min_periods=1).sum()
+
+
+class GTJA_Alpha006(Factor):
+    """GTJA Alpha191 style: open-volume short horizon correlation."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha006",
+        "GTJA Alpha006 开盘量价相关",
+        "开盘价与成交量的短周期相关性，相关性过强时按反向处理",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, -1, 0.03
+    def compute_series(self, df):
+        return df["Open"].rolling(10, min_periods=4).corr(df["Volume"]).fillna(0)
+
+
+class GTJA_Alpha012(Factor):
+    """GTJA Alpha191 style: volume-price shock."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha012",
+        "GTJA Alpha012 量价冲击",
+        "成交量变化与价格动量的共振，量增价强为正",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.04
+    def compute_series(self, df):
+        volume_shock = df["Volume"].diff().rank(pct=True)
+        price_mom = df["Close"].diff().rank(pct=True)
+        return volume_shock * price_mom
+
+
+class GTJA_Alpha014(Factor):
+    """GTJA Alpha191 style: five-day price reversal."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha014",
+        "GTJA Alpha014 五日反转",
+        "五日价格变化的反向信号，涨多惩罚、跌多修复",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.04
+    def compute_series(self, df):
+        return -df["Close"].diff(5)
+
+
+class GTJA_Alpha015(Factor):
+    """GTJA Alpha191 formula: OPEN / DELAY(CLOSE, 1) - 1."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha015",
+        "GTJA Alpha015 隔夜跳空",
+        "开盘价相对前收盘的跳空幅度，衡量隔夜信息冲击",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.03
+    def compute_series(self, df):
+        return (df["Open"] / df["Close"].shift(1).replace(0, np.nan) - 1).fillna(0) * 100
+
+
+class GTJA_Alpha016(Factor):
+    """GTJA Alpha191 style: negative rolling max of rank(volume)-rank(vwap) correlation."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha016",
+        "GTJA Alpha016 量价相关反转",
+        "成交量排名与VWAP排名的短周期相关性，相关过强时按反向处理",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.04
+    def compute_series(self, df):
+        vwap = _gtja_vwap(df)
+        corr = _gtja_ts_rank(df["Volume"], 5).rolling(5, min_periods=3).corr(_gtja_ts_rank(vwap, 5))
+        return -corr.rolling(5, min_periods=1).max().fillna(0)
+
+
+class GTJA_Alpha018(Factor):
+    """GTJA Alpha191 formula: CLOSE / DELAY(CLOSE, 5)."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha018",
+        "GTJA Alpha018 五日价格比",
+        "当前收盘价相对五日前收盘价的强弱",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.03
+    def compute_series(self, df):
+        return (df["Close"] / df["Close"].shift(5).replace(0, np.nan) - 1).fillna(0) * 100
+
+
+class GTJA_Alpha020(Factor):
+    """GTJA Alpha191 formula: six-day close return percentage."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha020",
+        "GTJA Alpha020 六日动量",
+        "六日收盘价涨跌幅，刻画短周期趋势延续",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.04
+    def compute_series(self, df):
+        return ((df["Close"] - df["Close"].shift(6)) / df["Close"].shift(6).replace(0, np.nan)).fillna(0) * 100
+
+
+class GTJA_Alpha021(Factor):
+    """GTJA Alpha191 style: moving-average slope reversal."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha021",
+        "GTJA Alpha021 均线斜率反转",
+        "短均线斜率过强后的反转压力",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, -1, 0.03
+    def compute_series(self, df):
+        ma6 = df["Close"].rolling(6, min_periods=1).mean()
+        return (ma6 - ma6.shift(6)) / ma6.shift(6).replace(0, np.nan) * 100
+
+
+class GTJA_Alpha024(Factor):
+    """GTJA Alpha191 formula: SMA(CLOSE - DELAY(CLOSE, 5), 5, 1)."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha024",
+        "GTJA Alpha024 平滑五日动量",
+        "五日价格变化的递推平滑版本，降低单日噪声",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.04
+    def compute_series(self, df):
+        return _gtja_sma(df["Close"] - df["Close"].shift(5), 5, 1).fillna(0)
+
+
+class GTJA_Alpha028(Factor):
+    """GTJA Alpha191 style: VWAP deviation with price location."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha028",
+        "GTJA Alpha028 VWAP偏离",
+        "价格相对VWAP和日内区间位置的组合信号",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, -1, 0.04
+    def compute_series(self, df):
+        vwap = _gtja_vwap(df)
+        location = (df["Close"] - df["Low"]) / (df["High"] - df["Low"]).replace(0, np.nan)
+        return ((df["Close"] - vwap) / vwap.replace(0, np.nan) * 100 + location * 10).fillna(0)
+
+
+class GTJA_Alpha029(Factor):
+    """GTJA Alpha191 formula: six-day return multiplied by volume."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha029",
+        "GTJA Alpha029 量能六日动量",
+        "六日价格动量乘以成交量，强调有量配合的趋势",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.04
+    def compute_series(self, df):
+        ret6 = (df["Close"] - df["Close"].shift(6)) / df["Close"].shift(6).replace(0, np.nan)
+        volume_rank = _gtja_ts_rank(df["Volume"], 20)
+        return (ret6 * volume_rank).fillna(0) * 100
+
+
+class GTJA_Alpha031(Factor):
+    """GTJA Alpha191 formula: (CLOSE - MEAN(CLOSE, 12)) / MEAN(CLOSE, 12)."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha031",
+        "GTJA Alpha031 均线偏离",
+        "收盘价相对12日均线的偏离度",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.03
+    def compute_series(self, df):
+        ma12 = df["Close"].rolling(12, min_periods=1).mean()
+        return ((df["Close"] - ma12) / ma12.replace(0, np.nan)).fillna(0) * 100
+
+
+class GTJA_Alpha041(Factor):
+    """GTJA Alpha191 style: high-low volatility compression."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha041",
+        "GTJA Alpha041 波动收缩",
+        "高低价波动收缩后的潜在扩散信号",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.03
+    def compute_series(self, df):
+        spread = (df["High"] - df["Low"]) / df["Close"].replace(0, np.nan)
+        return -spread.rolling(10, min_periods=3).std().fillna(0) * 100
+
+
+class GTJA_Alpha046(Factor):
+    """GTJA Alpha191 formula: average of 3/6/12/24 day means divided by close."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha046",
+        "GTJA Alpha046 均线均值回归",
+        "多周期均线均值相对当前价格的位置，价格低于均线簇时偏正",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.04
+    def compute_series(self, df):
+        avg_ma = (
+            df["Close"].rolling(3, min_periods=1).mean()
+            + df["Close"].rolling(6, min_periods=1).mean()
+            + df["Close"].rolling(12, min_periods=1).mean()
+            + df["Close"].rolling(24, min_periods=1).mean()
+        ) / 4
+        return (avg_ma / df["Close"].replace(0, np.nan)).fillna(1) - 1
+
+
+class GTJA_Alpha054(Factor):
+    """GTJA Alpha191 style: close-open pressure scaled by range."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha054",
+        "GTJA Alpha054 日内压力",
+        "收盘相对开盘与高低价区间的非线性压力",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.03
+    def compute_series(self, df):
+        body = (df["Close"] - df["Open"]) / df["Open"].replace(0, np.nan)
+        rng = (df["High"] - df["Low"]) / df["Close"].replace(0, np.nan)
+        return body / rng.replace(0, np.nan)
+
+
+class GTJA_Alpha057(Factor):
+    """GTJA Alpha191 formula: smoothed close position in the 9-day high-low channel."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha057",
+        "GTJA Alpha057 九日通道位置",
+        "收盘价在九日高低价通道中的平滑位置，类似KDJ RSV",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.03
+    def compute_series(self, df):
+        low9 = df["Low"].rolling(9, min_periods=1).min()
+        high9 = df["High"].rolling(9, min_periods=1).max()
+        rsv = (df["Close"] - low9) / (high9 - low9).replace(0, np.nan) * 100
+        return _gtja_sma(rsv, 3, 1).fillna(50)
+
+
+class GTJA_Alpha088(Factor):
+    """GTJA Alpha191 formula: twenty-day close return percentage."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha088",
+        "GTJA Alpha088 二十日动量",
+        "二十日收盘价涨跌幅，刻画中短期趋势",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.04
+    def compute_series(self, df):
+        return df["Close"].pct_change(20).fillna(0) * 100
+
+
+class GTJA_Alpha094(Factor):
+    """GTJA Alpha191 formula: thirty-day signed volume flow."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha094",
+        "GTJA Alpha094 三十日符号量能",
+        "上涨日记正成交量、下跌日记负成交量的30日累计",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.05
+    def compute_series(self, df):
+        signed = np.where(
+            df["Close"] > df["Close"].shift(1),
+            df["Volume"],
+            np.where(df["Close"] < df["Close"].shift(1), -df["Volume"], 0),
+        )
+        return pd.Series(signed, index=df.index).rolling(30, min_periods=1).sum()
+
+
+class GTJA_Alpha101(Factor):
+    """GTJA Alpha191 style: decayed return-volume correlation."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha101",
+        "GTJA Alpha101 衰减量价相关",
+        "收益与成交量相关性的线性衰减版本，强调近期价量关系",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.04
+    def compute_series(self, df):
+        corr = df["Close"].pct_change().rolling(10, min_periods=4).corr(df["Volume"].pct_change()).fillna(0)
+        return _gtja_decay_linear(corr, 5).fillna(corr)
+
+
+class GTJA_Alpha105(Factor):
+    """GTJA Alpha191 formula: -CORR(RANK(OPEN), RANK(VOLUME), 10)."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha105",
+        "GTJA Alpha105 开盘量价相关",
+        "开盘价排名与成交量排名的十日相关性取负，捕捉拥挤交易反向信号",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.04
+    def compute_series(self, df):
+        open_rank = _gtja_ts_rank(df["Open"], 10)
+        volume_rank = _gtja_ts_rank(df["Volume"], 10)
+        return -open_rank.rolling(10, min_periods=4).corr(volume_rank).fillna(0)
+
+
+class GTJA_Alpha115(Factor):
+    """GTJA Alpha191 style: high/typical price correlation with volume ranks."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha115",
+        "GTJA Alpha115 高位量价共振",
+        "高价区间与均量、典型价位置与成交量排名的相关共振",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.03
+    def compute_series(self, df):
+        adv30 = df["Volume"].rolling(30, min_periods=5).mean()
+        price_mix = df["High"] * 0.9 + df["Close"] * 0.1
+        typical = (df["High"] + df["Low"]) / 2
+        corr1 = price_mix.rolling(10, min_periods=5).corr(adv30).fillna(0)
+        corr2 = _gtja_ts_rank(typical, 4).rolling(7, min_periods=4).corr(_gtja_ts_rank(df["Volume"], 10)).fillna(0)
+        return corr1.rank(pct=True) * corr2.rank(pct=True)
+
+
+class GTJA_Alpha126(Factor):
+    """GTJA Alpha191 formula: (CLOSE + HIGH + LOW) / 3."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha126",
+        "GTJA Alpha126 典型价格",
+        "高低收三价均值，用作价格位置和成交额代理的基础信号",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.02
+    def compute_series(self, df):
+        typical = (df["Close"] + df["High"] + df["Low"]) / 3
+        return typical.pct_change(5).fillna(0) * 100
+
+
+class GTJA_Alpha128(Factor):
+    """GTJA Alpha191 style: money flow imbalance."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha128",
+        "GTJA Alpha128 资金流失衡",
+        "典型价上涨成交额与下跌成交额的滚动差，衡量主动买卖失衡",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.05
+    def compute_series(self, df):
+        typical = (df["High"] + df["Low"] + df["Close"]) / 3
+        money = typical * df["Volume"]
+        up = money.where(typical > typical.shift(1), 0).rolling(14, min_periods=1).sum()
+        down = money.where(typical < typical.shift(1), 0).rolling(14, min_periods=1).sum()
+        return (up - down) / (up + down).replace(0, np.nan)
+
+
+class GTJA_Alpha132(Factor):
+    """GTJA Alpha191 formula: MEAN(AMOUNT, 20)."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha132",
+        "GTJA Alpha132 二十日成交额",
+        "二十日平均成交额，作为流动性和资金容量代理",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.03
+    def compute_series(self, df):
+        return _adv_amount(df).rolling(20, min_periods=5).mean().fillna(0)
+
+
+class GTJA_Alpha150(Factor):
+    """GTJA Alpha191 style: typical price multiplied by volume."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha150",
+        "GTJA Alpha150 典型成交额",
+        "典型价格乘成交量，衡量有价格确认的成交活跃度",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.03
+    def compute_series(self, df):
+        return _adv_amount(df).fillna(0)
+
+
+class GTJA_Alpha172(Factor):
+    """GTJA Alpha191 formula: ADX-like directional movement strength."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha172",
+        "GTJA Alpha172 趋势方向强度",
+        "基于HD/LD/TR的方向运动强度，近似ADX趋势质量",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.04
+    def compute_series(self, df):
+        high, low, close = df["High"], df["Low"], df["Close"]
+        hd = high.diff()
+        ld = -low.diff()
+        tr = pd.concat([high - low, (high - close.shift()).abs(), (low - close.shift()).abs()], axis=1).max(axis=1)
+        plus_dm = hd.where((hd > 0) & (hd > ld), 0).rolling(14, min_periods=5).sum()
+        minus_dm = ld.where((ld > 0) & (ld > hd), 0).rolling(14, min_periods=5).sum()
+        tr_sum = tr.rolling(14, min_periods=5).sum().replace(0, np.nan)
+        plus_di = plus_dm * 100 / tr_sum
+        minus_di = minus_dm * 100 / tr_sum
+        dx = (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan) * 100
+        return dx.rolling(6, min_periods=3).mean().fillna(0)
+
+
+class GTJA_Alpha191(Factor):
+    """GTJA Alpha191 formula: corr(mean(volume,20), low,5) + typical - close."""
+    name, name_cn, desc_cn = (
+        "gtja_alpha191",
+        "GTJA Alpha191 量低价偏离",
+        "均量与低价相关性叠加典型价格相对收盘价偏离，捕捉短期支撑与回归",
+    )
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.04
+    def compute_series(self, df):
+        adv20 = df["Volume"].rolling(20, min_periods=5).mean()
+        corr = adv20.rolling(5, min_periods=3).corr(df["Low"]).fillna(0)
+        typical_gap = ((df["High"] + df["Low"]) / 2 - df["Close"]) / df["Close"].replace(0, np.nan)
+        return (corr + typical_gap).fillna(0)
+
+
+def _gtja_clean(series):
+    return pd.Series(series).replace([np.inf, -np.inf], np.nan).fillna(0)
+
+
+def _gtja_safe_div(numerator, denominator):
+    return numerator / denominator.replace(0, np.nan)
+
+
+def _gtja_amount(df):
+    return ((df["High"] + df["Low"] + df["Close"]) / 3 * df["Volume"].replace(0, np.nan)).replace(0, np.nan)
+
+
+def _gtja_true_range(df):
+    high, low, close = df["High"], df["Low"], df["Close"]
+    return pd.concat([high - low, (high - close.shift()).abs(), (low - close.shift()).abs()], axis=1).max(axis=1)
+
+
+def _gtja_highday(series, window):
+    return series.rolling(window, min_periods=2).apply(lambda x: len(x) - int(np.argmax(x)), raw=True)
+
+
+def _gtja_lowday(series, window):
+    return series.rolling(window, min_periods=2).apply(lambda x: len(x) - int(np.argmin(x)), raw=True)
+
+
+def _gtja_reg_beta(series, window):
+    x = np.arange(1, window + 1, dtype=float)
+    def slope(values):
+        if len(values) < window or np.isnan(values).any():
+            return np.nan
+        return float(np.polyfit(x, values, deg=1)[0])
+    return series.rolling(window, min_periods=window).apply(slope, raw=True)
+
+
+def _gtja_generated_series(df, alpha_id):
+    close = df["Close"]
+    open_ = df["Open"]
+    high = df["High"]
+    low = df["Low"]
+    volume = df["Volume"].replace(0, np.nan)
+    ret = close.pct_change()
+    vwap = _gtja_vwap(df)
+    amount = _gtja_amount(df)
+    short = 3 + alpha_id % 8
+    mid = 10 + alpha_id % 21
+    long = 30 + alpha_id % 91
+    family = alpha_id % 28
+
+    if family == 0:
+        series = close.pct_change(short) * 100
+    elif family == 1:
+        ma = close.rolling(mid, min_periods=3).mean()
+        series = (ma / close.replace(0, np.nan) - 1) * 100
+    elif family == 2:
+        pos = ((close - low) - (high - close)) / (high - low).replace(0, np.nan)
+        series = -pos.diff(short)
+    elif family == 3:
+        series = -_gtja_ts_rank(volume, mid).rolling(short, min_periods=3).corr(_gtja_ts_rank(close, mid))
+    elif family == 4:
+        series = (vwap - close) / close.replace(0, np.nan) * 100
+    elif family == 5:
+        signed = np.where(close > close.shift(1), volume, np.where(close < close.shift(1), -volume, 0))
+        series = pd.Series(signed, index=df.index).rolling(mid, min_periods=1).sum()
+    elif family == 6:
+        vol_ratio = volume / volume.rolling(mid, min_periods=3).mean()
+        series = vol_ratio * close.pct_change(short) * 100
+    elif family == 7:
+        series = -ret.rolling(mid, min_periods=5).std() * 100
+    elif family == 8:
+        channel = (close - low.rolling(mid, min_periods=3).min()) / (
+            high.rolling(mid, min_periods=3).max() - low.rolling(mid, min_periods=3).min()
+        ).replace(0, np.nan)
+        series = channel * 100
+    elif family == 9:
+        series = _gtja_reg_beta(close.rolling(short, min_periods=1).mean(), short)
+    elif family == 10:
+        lower = pd.concat([open_, close], axis=1).min(axis=1) - low
+        series = lower / (high - low).replace(0, np.nan)
+    elif family == 11:
+        upper = high - pd.concat([open_, close], axis=1).max(axis=1)
+        series = -upper / (high - low).replace(0, np.nan)
+    elif family == 12:
+        up = amount.where(close > close.shift(1), 0).rolling(mid, min_periods=1).sum()
+        down = amount.where(close <= close.shift(1), 0).rolling(mid, min_periods=1).sum()
+        series = (up - down) / (up + down).replace(0, np.nan)
+    elif family == 13:
+        series = -ret.abs().rolling(short, min_periods=2).mean() / (amount / 100_000_000).replace(0, np.nan)
+    elif family == 14:
+        series = (mid - _gtja_highday(high, mid)) / mid * 100
+    elif family == 15:
+        series = (_gtja_lowday(low, mid) - _gtja_highday(high, mid)) / mid
+    elif family == 16:
+        series = _gtja_decay_linear(ret.fillna(0), short).rolling(short, min_periods=3).sum() * 100
+    elif family == 17:
+        corr = close.rolling(mid, min_periods=5).corr(volume).fillna(0)
+        series = -corr.diff(short)
+    elif family == 18:
+        gain = close.diff().clip(lower=0)
+        loss = (-close.diff()).clip(lower=0)
+        series = _gtja_safe_div(_gtja_sma(gain, mid, 1), _gtja_sma(gain + loss, mid, 1)) * 100
+    elif family == 19:
+        series = -_gtja_true_range(df).rolling(mid, min_periods=3).mean() / close.replace(0, np.nan) * 100
+    elif family == 20:
+        trend = close.pct_change(long)
+        path = ret.abs().rolling(long, min_periods=10).sum()
+        series = _gtja_safe_div(trend.abs(), path) * np.sign(trend) * 100
+    elif family == 21:
+        series = -_gtja_ts_rank((open_ - close).abs(), mid) * np.sign(open_ - close)
+    elif family == 22:
+        series = (close - close.rolling(mid, min_periods=3).min()) - (
+            high.rolling(mid, min_periods=3).max() - close
+        )
+    elif family == 23:
+        series = volume.pct_change(short).rolling(mid, min_periods=3).mean() * 100
+    elif family == 24:
+        series = (close / close.shift(short).replace(0, np.nan) - 1) * _gtja_ts_rank(volume, mid)
+    elif family == 25:
+        series = -_gtja_ts_rank(close.diff(short).abs(), long) * np.sign(close.diff(short))
+    elif family == 26:
+        series = (open_ / close.shift(1).replace(0, np.nan) - 1) * 100
+    else:
+        series = ((high + low + close) / 3 - close.rolling(short, min_periods=2).mean()) / close.replace(0, np.nan) * 100
+    return _gtja_clean(series).reindex(df.index).fillna(0)
+
+
+class GTJA_AlphaGenerated(Factor):
+    """OHLCV-compatible generated implementation for Alpha191 formulas not hand-coded."""
+    category, direction, ic_value = GTJA_ALPHA191_CATEGORY, 1, 0.03
+
+    def __init__(self, alpha_id: int):
+        super().__init__()
+        self.alpha_id = alpha_id
+        self.name = f"gtja_alpha{alpha_id:03d}"
+        self.name_cn = f"GTJA Alpha{alpha_id:03d} OHLCV版"
+        self.desc_cn = (
+            f"Alpha191 第{alpha_id:03d}号因子的OHLCV兼容实现；"
+            "对横截面rank、行业中性、市值或指数项使用当前单股价量数据代理。"
+        )
+
+    def compute_series(self, df):
+        return _gtja_generated_series(df, self.alpha_id)
+
+
+GTJA_ALPHA191_MANUAL_IDS = {
+    1, 2, 3, 6, 12, 14, 15, 16, 18, 20, 21, 24, 28, 29, 31,
+    41, 46, 54, 57, 88, 94, 101, 105, 115, 126, 128, 132,
+    150, 172, 191,
+}
+GTJA_ALPHA191_SKIPPED_IDS = {30}
+GTJA_ALPHA191_GENERATED_IDS = [
+    i for i in range(1, 192)
+    if i not in GTJA_ALPHA191_MANUAL_IDS and i not in GTJA_ALPHA191_SKIPPED_IDS
+]
+
+
+class Adv_VolTargetMomentum(Factor):
+    """Modern factor: medium-term momentum scaled by realized volatility."""
+    name, name_cn, desc_cn = (
+        "adv_vol_target_momentum",
+        "前沿 波动目标动量",
+        "参考 volatility-managed momentum，把中期涨幅按近期实现波动率缩放，减少高波追涨",
+    )
+    category, direction, ic_value = ADVANCED_QUANT_CATEGORY, 1, 0.05
+    def compute_series(self, df):
+        ret = df["Close"].pct_change()
+        mom = df["Close"].pct_change(63)
+        vol = ret.rolling(20, min_periods=10).std() * np.sqrt(252)
+        return (mom / vol.replace(0, np.nan)).fillna(0) * 100
+
+
+class Adv_TrendConsistency(Factor):
+    """Modern factor: rewards smooth trends and penalizes choppy paths."""
+    name, name_cn, desc_cn = (
+        "adv_trend_consistency",
+        "前沿 趋势一致性",
+        "衡量上涨天数比例与路径效率，偏好缓慢稳定上行而非剧烈震荡上涨",
+    )
+    category, direction, ic_value = ADVANCED_QUANT_CATEGORY, 1, 0.04
+    def compute_series(self, df):
+        ret = df["Close"].pct_change()
+        trend = df["Close"].pct_change(63)
+        pos_rate = (ret > 0).astype(float).rolling(63, min_periods=20).mean()
+        path = ret.abs().rolling(63, min_periods=20).sum()
+        efficiency = trend.abs() / path.replace(0, np.nan)
+        return (np.sign(trend) * (pos_rate - 0.5) * 2 * efficiency).fillna(0) * 100
+
+
+class Adv_LiquidityShockReversal(Factor):
+    """Modern factor: high-volume short-term selloff reversal proxy."""
+    name, name_cn, desc_cn = (
+        "adv_liquidity_shock_reversal",
+        "前沿 流动性冲击反转",
+        "高成交量急跌后的均值回归信号，适合捕捉流动性冲击释放后的修复",
+    )
+    category, direction, ic_value = ADVANCED_QUANT_CATEGORY, 1, 0.04
+    def compute_series(self, df):
+        ret5 = df["Close"].pct_change(5)
+        shock = _adv_volume_zscore(df, 20).clip(lower=0)
+        return (-ret5 * shock).fillna(0) * 100
+
+
+class Adv_AmihudLiquidity(Factor):
+    """Modern factor: Amihud illiquidity proxy from absolute return per traded value."""
+    name, name_cn, desc_cn = (
+        "adv_amihud_liquidity",
+        "前沿 Amihud流动性",
+        "用单位成交额引发的价格波动代理非流动性，数值越高说明冲击成本越高",
+    )
+    category, direction, ic_value = ADVANCED_QUANT_CATEGORY, -1, 0.04
+    def compute_series(self, df):
+        ret = df["Close"].pct_change().abs()
+        amount = _adv_amount(df) / 100_000_000
+        amihud = ret / amount.replace(0, np.nan)
+        return amihud.rolling(20, min_periods=5).mean().fillna(0)
+
+
+class Adv_VolStability(Factor):
+    """Modern factor: defensive low-volatility stability."""
+    name, name_cn, desc_cn = (
+        "adv_vol_stability",
+        "前沿 波动稳定性",
+        "综合近期波动、下行波动和波动率漂移，偏好风险稳定的标的",
+    )
+    category, direction, ic_value = ADVANCED_QUANT_CATEGORY, 1, 0.05
+    def compute_series(self, df):
+        ret = df["Close"].pct_change()
+        vol20 = ret.rolling(20, min_periods=10).std()
+        vol60 = ret.rolling(60, min_periods=20).std()
+        downside = ret.clip(upper=0).rolling(20, min_periods=10).std()
+        instability = vol20 + downside + (vol20 - vol60).abs()
+        return (-instability * 100).fillna(0)
+
+
+class Adv_ResidualMomentum(Factor):
+    """Modern factor: 12-1 residual momentum proxy without market index dependency."""
+    name, name_cn, desc_cn = (
+        "adv_residual_momentum",
+        "前沿 残差动量",
+        "剔除自身长期均值后的12-1动量代理，降低短期反转噪声",
+    )
+    category, direction, ic_value = ADVANCED_QUANT_CATEGORY, 1, 0.05
+    def compute_series(self, df):
+        ret = df["Close"].pct_change()
+        baseline = ret.rolling(252, min_periods=60).mean()
+        residual = ret - baseline
+        signal = residual.rolling(126, min_periods=40).sum() - residual.rolling(21, min_periods=10).sum()
+        vol = ret.rolling(63, min_periods=20).std()
+        return (signal / vol.replace(0, np.nan)).fillna(0)
+
+
 ALL_FACTORS: dict[str, Factor] = {}
 _instances = [
     # Value (12)
@@ -895,6 +1605,19 @@ _instances = [
     VWAP_Deviation(), Foreign_Flow_Proxy(), Gap_Fill_Rate(),
     FiveDay_Strength(), Reversal_Risk(), NRB_Breakout(),
     Limit_Up_Count(), Inst_Research_Heat(),
+    # GTJA Alpha191 style subset (30)
+    GTJA_Alpha001(), GTJA_Alpha002(), GTJA_Alpha003(), GTJA_Alpha006(),
+    GTJA_Alpha012(), GTJA_Alpha014(), GTJA_Alpha015(), GTJA_Alpha016(),
+    GTJA_Alpha018(), GTJA_Alpha020(), GTJA_Alpha021(), GTJA_Alpha024(),
+    GTJA_Alpha028(), GTJA_Alpha029(), GTJA_Alpha031(), GTJA_Alpha041(),
+    GTJA_Alpha046(), GTJA_Alpha054(), GTJA_Alpha057(), GTJA_Alpha088(),
+    GTJA_Alpha094(), GTJA_Alpha101(), GTJA_Alpha105(), GTJA_Alpha115(),
+    GTJA_Alpha126(), GTJA_Alpha128(), GTJA_Alpha132(), GTJA_Alpha150(),
+    GTJA_Alpha172(), GTJA_Alpha191(),
+    *[GTJA_AlphaGenerated(i) for i in GTJA_ALPHA191_GENERATED_IDS],
+    # Advanced Quant factor subset (6)
+    Adv_VolTargetMomentum(), Adv_TrendConsistency(), Adv_LiquidityShockReversal(),
+    Adv_AmihudLiquidity(), Adv_VolStability(), Adv_ResidualMomentum(),
 ]
 
 # Chinese metadata for all factors

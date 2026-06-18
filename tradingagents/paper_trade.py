@@ -4,7 +4,7 @@
 - T+1: 当日买入次日才能卖出
 - 涨跌停: 主板±10%, 科创/创业±20%, ST±5%
 - 交易时间: 9:30-11:30, 13:00-15:00
-- 手数: 主板100股, 科创/创业板200股
+- 手数: 主板/创业板100股, 科创板200股
 - 费用: 印花税0.05%(单边卖), 佣金0.025%(最低5元), 过户费0.001%
 - 停牌/退市: 标记不可交易状态
 """
@@ -52,7 +52,59 @@ def _get_board(code: str) -> str:
 
 def _lot_size(code: str) -> int:
     """Minimum trading unit (股)."""
-    return 200 if _get_board(code) in ("star", "chinext") else 100
+    return 200 if _get_board(code) == "star" else 100
+
+
+def build_signal_order_plan(signal: dict, position: dict) -> dict:
+    """Translate one deterministic holding signal into a proposed order."""
+    action = str(signal.get("action") or "HOLD")
+    code = str(position.get("code") or "")
+    shares = max(0, int(position.get("shares", 0) or 0))
+    sellable = max(0, min(shares, int(position.get("sellable", 0) or 0)))
+    lot = _lot_size(code)
+
+    if action in {"STOP_LOSS", "EXIT"}:
+        if sellable <= 0:
+            reason = "平仓信号已触发，但受T+1限制，当前无可卖股份"
+        else:
+            reason = "平仓信号：卖出全部可卖持仓"
+        return {
+            "kind": "clear",
+            "action": "卖出",
+            "shares": sellable,
+            "enabled": sellable > 0,
+            "reason": reason,
+        }
+
+    if action in {"TAKE_PROFIT", "REDUCE"}:
+        target = (sellable // 2 // lot) * lot
+        if target <= 0 and sellable > 0:
+            target = sellable
+        return {
+            "kind": "reduce",
+            "action": "卖出",
+            "shares": target,
+            "enabled": target > 0,
+            "reason": "止盈/减仓信号：先卖出约一半可卖持仓" if target else "减仓信号已触发，但受T+1限制",
+        }
+
+    if action == "ADD":
+        target = max(lot, (shares // 4 // lot) * lot)
+        return {
+            "kind": "add",
+            "action": "买入",
+            "shares": target,
+            "enabled": True,
+            "reason": "加仓信号：建议单次不超过当前持仓的25%",
+        }
+
+    return {
+        "kind": "hold",
+        "action": "",
+        "shares": 0,
+        "enabled": False,
+        "reason": "当前策略信号为持有，不生成卖出、加仓或清仓委托",
+    }
 
 
 def _price_limit_pct(code: str, name: str = "") -> float:
