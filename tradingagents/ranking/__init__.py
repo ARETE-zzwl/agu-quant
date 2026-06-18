@@ -6,6 +6,7 @@ from .signal_engine import evaluate_code_signal, evaluate_stock_signal
 from .strategy_optimizer import optimize_strategy_weights
 from .recommendation_engine import run_one_click_recommendation
 from .small_account import build_small_account_plan
+from .small_account_strategy import run_small_account_strategy
 from .strategy_ensemble import build_strategy_consensus
 
 __all__ = [
@@ -16,5 +17,6 @@ __all__ = [
     "optimize_strategy_weights",
     "run_one_click_recommendation",
     "build_small_account_plan",
+    "run_small_account_strategy",
     "build_strategy_consensus",
 ]

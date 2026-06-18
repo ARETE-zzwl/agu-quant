@@ -86,7 +86,7 @@ def test_strategy_rows_do_not_truncate_non_winners():
     assert rows[-1]["排名"] == 18
 
 
-def test_one_click_builds_consensus_from_top_three_strategies(monkeypatch):
+def _mock_one_click_dependencies(monkeypatch):
     ranked = [
         {
             "key": f"s{i}",
@@ -106,8 +106,10 @@ def test_one_click_builds_consensus_from_top_three_strategies(monkeypatch):
     ]
     monkeypatch.setattr(rec, "get_liquid_universe", lambda size: _universe() * 3)
     monkeypatch.setattr(rec, "compare_strategy_presets", lambda *args, **kwargs: {"ranked": ranked})
+    calls = []
 
     def fake_recommend(universe, *, strategy_key, recommend_n, end_date):
+        calls.append(strategy_key)
         rows = [_candidate for _candidate in [
             {
                 "代码": "AAA",
@@ -126,8 +128,28 @@ def test_one_click_builds_consensus_from_top_three_strategies(monkeypatch):
         }
 
     monkeypatch.setattr(rec, "recommend_strategy_candidates", fake_recommend)
+    return calls
 
-    result = rec.run_one_click_recommendation(universe_size=6, recommend_n=2, max_positions=2)
+
+def test_one_click_keeps_original_best_strategy_path_by_default(monkeypatch):
+    calls = _mock_one_click_dependencies(monkeypatch)
+
+    result = rec.run_one_click_recommendation(universe_size=6, recommend_n=2, max_positions=10)
+
+    assert "consensus_analysis" not in result
+    assert calls == ["s0"]
+
+
+def test_one_click_builds_consensus_only_when_explicitly_requested(monkeypatch):
+    calls = _mock_one_click_dependencies(monkeypatch)
+
+    result = rec.run_one_click_recommendation(
+        universe_size=6,
+        recommend_n=2,
+        max_positions=2,
+        include_consensus=True,
+    )
 
     assert result["consensus_analysis"]["strategies_used"] == ["s0", "s1", "s2"]
     assert result["consensus_analysis"]["candidates"][0]["support_count"] == 3
+    assert calls == ["s0", "s1", "s2"]

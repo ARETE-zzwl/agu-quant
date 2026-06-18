@@ -249,6 +249,7 @@ def run_one_click_recommendation(
     top_pct: float = 0.2,
     rebalance_days: int = 10,
     max_positions: int = 10,
+    include_consensus: bool = False,
 ) -> dict[str, Any]:
     """Backtest strategies and recommend current candidates in one call."""
     end_date = datetime.now().strftime("%Y-%m-%d")
@@ -278,31 +279,7 @@ def run_one_click_recommendation(
         recommend_n=recommend_n,
         end_date=end_date,
     )
-    consensus_inputs = []
-    for strategy in ranked_strategies[:3]:
-        strategy_selection = selection
-        if strategy["key"] != best["key"]:
-            strategy_selection = recommend_strategy_candidates(
-                universe,
-                strategy_key=strategy["key"],
-                recommend_n=recommend_n,
-                end_date=end_date,
-            )
-        consensus_inputs.append(
-            {
-                "key": strategy["key"],
-                "label": strategy["label"],
-                "objective_score": strategy["metrics"]["objective_score"],
-                "candidates": strategy_selection["candidates"],
-            }
-        )
-    consensus_analysis = build_strategy_consensus(
-        consensus_inputs,
-        max_strategies=3,
-        max_candidates=recommend_n,
-    )
-
-    return {
+    result = {
         "date": end_date,
         "start_date": start_date,
         "universe_size": len(universe),
@@ -321,7 +298,31 @@ def run_one_click_recommendation(
         "universe": universe,
         "recommendations": selection["recommendations"],
         "strategy_candidates": selection["candidates"],
-        "consensus_analysis": consensus_analysis,
         "strict_buy_count": selection["strict_buy_count"],
         "watch_count": selection["watch_count"],
     }
+    if include_consensus:
+        consensus_inputs = []
+        for strategy in ranked_strategies[:3]:
+            strategy_selection = selection
+            if strategy["key"] != best["key"]:
+                strategy_selection = recommend_strategy_candidates(
+                    universe,
+                    strategy_key=strategy["key"],
+                    recommend_n=recommend_n,
+                    end_date=end_date,
+                )
+            consensus_inputs.append(
+                {
+                    "key": strategy["key"],
+                    "label": strategy["label"],
+                    "objective_score": strategy["metrics"]["objective_score"],
+                    "candidates": strategy_selection["candidates"],
+                }
+            )
+        result["consensus_analysis"] = build_strategy_consensus(
+            consensus_inputs,
+            max_strategies=3,
+            max_candidates=recommend_n,
+        )
+    return result
