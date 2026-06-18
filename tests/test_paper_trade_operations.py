@@ -1,4 +1,10 @@
-from tradingagents.paper_trade import build_signal_order_plan
+from tradingagents.paper_trade import _lot_size, build_signal_order_plan
+
+
+def test_board_lot_sizes_match_small_account_execution_rules():
+    assert _lot_size("688001") == 200
+    assert _lot_size("300003") == 100
+    assert _lot_size("600519") == 100
 
 
 def test_exit_signal_plans_full_sellable_position():

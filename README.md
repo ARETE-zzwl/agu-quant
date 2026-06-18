@@ -125,7 +125,7 @@ python -m pytest tests/ -v
 Web UI 本地验证：
 
 ```bash
-streamlit run web/launch.py
+streamlit run web/app.py
 ```
 
 ## 私有部署

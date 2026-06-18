@@ -15,7 +15,7 @@ from tradingagents.ranking.recommendation_engine import run_paper_trade_quick_se
 from tradingagents.ranking.portfolio_advisor import generate_portfolio_advice
 from tradingagents.paper_trade import build_signal_order_plan, get_account, is_trading_time
 
-st.set_page_config(page_title="模拟盘", page_icon="💰", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="模拟盘", page_icon="💰", layout="wide", initial_sidebar_state="collapsed")
 inject_css()
 require_premium_page("模拟盘")
 
@@ -288,6 +288,18 @@ with tab_pick:
 
         recs = quick.get("recommendations", [])
         if recs:
+            imported_plan = st.session_state.get("small_account_plan", {})
+            rec_codes = {row["代码"] for row in recs}
+            planned_orders = [
+                row for row in imported_plan.get("orders", [])
+                if row.get("code") in rec_codes
+            ]
+            if planned_orders:
+                st.info(
+                    f"已接收小资金计划：{len(planned_orders)} 只，预计投入 "
+                    f"¥{imported_plan.get('invested', 0):,.0f}，剩余现金 "
+                    f"¥{imported_plan.get('remaining_cash', 0):,.0f}。"
+                )
             rows = []
             for i, r in enumerate(recs, start=1):
                 rows.append({
@@ -326,7 +338,7 @@ with tab_pick:
                 }
                 st.rerun()
             if b2.button(
-                "一键买入全部候选",
+                "按小资金计划一键买入" if planned_orders else "一键买入全部候选",
                 type="primary",
                 width="stretch",
                 disabled=remain_slots == 0,
@@ -334,15 +346,29 @@ with tab_pick:
                 if not market_open:
                     st.error("当前非交易时间，无法一键买入；可以先填入买入单，开盘后确认。")
                 else:
-                    buy_count = min(len(recs), remain_slots)
-                    per_amount = summary["cash"] * 0.95 / max(1, buy_count)
                     filled, rejected = 0, []
-                    for row in recs[:buy_count]:
-                        order = acc.buy(row["代码"], amount=per_amount)
+                    if planned_orders:
+                        buy_requests = [
+                            {"code": row["code"], "shares": row["shares"], "amount": None}
+                            for row in planned_orders[:remain_slots]
+                        ]
+                    else:
+                        buy_count = min(len(recs), remain_slots)
+                        per_amount = summary["cash"] * 0.95 / max(1, buy_count)
+                        buy_requests = [
+                            {"code": row["代码"], "shares": None, "amount": per_amount}
+                            for row in recs[:buy_count]
+                        ]
+                    for request in buy_requests:
+                        order = acc.buy(
+                            request["code"],
+                            shares=request["shares"],
+                            amount=request["amount"],
+                        )
                         if order.status == "filled":
                             filled += 1
                         else:
-                            rejected.append(f"{row['代码']}: {order.reason}")
+                            rejected.append(f"{request['code']}: {order.reason}")
                     if filled:
                         st.success(f"已买入 {filled} 只候选股")
                     if rejected:

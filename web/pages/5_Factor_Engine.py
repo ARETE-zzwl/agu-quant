@@ -21,7 +21,7 @@ from tradingagents.ranking.strategy_optimizer import (
     save_optimized_strategy,
 )
 
-st.set_page_config(page_title="因子引擎", page_icon="⚙️", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="因子引擎", page_icon="⚙️", layout="wide", initial_sidebar_state="collapsed")
 inject_css()
 require_premium_page("因子引擎")
 

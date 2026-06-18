@@ -7,6 +7,7 @@ from typing import Any
 
 from .scoring_engine import ScoringEngine
 from .signal_engine import evaluate_code_signal
+from .strategy_ensemble import build_strategy_consensus
 from .strategy_optimizer import compare_strategy_presets
 
 
@@ -277,6 +278,29 @@ def run_one_click_recommendation(
         recommend_n=recommend_n,
         end_date=end_date,
     )
+    consensus_inputs = []
+    for strategy in ranked_strategies[:3]:
+        strategy_selection = selection
+        if strategy["key"] != best["key"]:
+            strategy_selection = recommend_strategy_candidates(
+                universe,
+                strategy_key=strategy["key"],
+                recommend_n=recommend_n,
+                end_date=end_date,
+            )
+        consensus_inputs.append(
+            {
+                "key": strategy["key"],
+                "label": strategy["label"],
+                "objective_score": strategy["metrics"]["objective_score"],
+                "candidates": strategy_selection["candidates"],
+            }
+        )
+    consensus_analysis = build_strategy_consensus(
+        consensus_inputs,
+        max_strategies=3,
+        max_candidates=recommend_n,
+    )
 
     return {
         "date": end_date,
@@ -297,6 +321,7 @@ def run_one_click_recommendation(
         "universe": universe,
         "recommendations": selection["recommendations"],
         "strategy_candidates": selection["candidates"],
+        "consensus_analysis": consensus_analysis,
         "strict_buy_count": selection["strict_buy_count"],
         "watch_count": selection["watch_count"],
     }

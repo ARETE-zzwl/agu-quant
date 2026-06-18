@@ -84,3 +84,50 @@ def test_strategy_rows_do_not_truncate_non_winners():
 
     assert len(rows) == 18
     assert rows[-1]["排名"] == 18
+
+
+def test_one_click_builds_consensus_from_top_three_strategies(monkeypatch):
+    ranked = [
+        {
+            "key": f"s{i}",
+            "label": f"策略{i}",
+            "desc": "",
+            "weights": {},
+            "metrics": {
+                "objective_score": 30 - i,
+                "annual_return": 0.1,
+                "sharpe_ratio": 1.0,
+                "max_drawdown": 0.1,
+                "win_rate": 0.55,
+                "avg_turnover": 0.2,
+            },
+        }
+        for i in range(4)
+    ]
+    monkeypatch.setattr(rec, "get_liquid_universe", lambda size: _universe() * 3)
+    monkeypatch.setattr(rec, "compare_strategy_presets", lambda *args, **kwargs: {"ranked": ranked})
+
+    def fake_recommend(universe, *, strategy_key, recommend_n, end_date):
+        rows = [_candidate for _candidate in [
+            {
+                "代码": "AAA",
+                "名称": "共识样本",
+                "动作Key": "BUY",
+                "风险": "低",
+                "综合分": 80,
+                "现价": 10,
+            }
+        ]]
+        return {
+            "candidates": rows,
+            "recommendations": rows,
+            "strict_buy_count": 1,
+            "watch_count": 0,
+        }
+
+    monkeypatch.setattr(rec, "recommend_strategy_candidates", fake_recommend)
+
+    result = rec.run_one_click_recommendation(universe_size=6, recommend_n=2, max_positions=2)
+
+    assert result["consensus_analysis"]["strategies_used"] == ["s0", "s1", "s2"]
+    assert result["consensus_analysis"]["candidates"][0]["support_count"] == 3

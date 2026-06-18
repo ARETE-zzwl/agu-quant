@@ -14,6 +14,7 @@ from tradingagents.ranking.recommendation_engine import (
     recommend_strategy_candidates,
     run_one_click_recommendation,
 )
+from tradingagents.ranking.small_account import build_small_account_plan
 
 
 def _build_paper_import(stocks: list[dict], strategy_key: str) -> dict:
@@ -137,6 +138,11 @@ with st.expander("🎯 多策略回测与当下选股", expanded=True):
     oc_period = oc2.selectbox("回测周期", [90, 180, 365], index=1, format_func=lambda days: f"近{days}天")
     oc_n = oc3.selectbox("每套查看", [5, 10, 15], index=1, format_func=lambda count: f"Top {count}")
     one_click = oc4.button("开始多策略回测", type="primary", use_container_width=True)
+    ac1, ac2, ac3 = st.columns(3)
+    account_cash = ac1.number_input("可用资金（元）", min_value=5_000, max_value=5_000_000, value=50_000, step=5_000)
+    account_positions = ac2.selectbox("最多持有", [1, 2, 3, 5, 10], index=1, format_func=lambda count: f"{count} 只")
+    reserve_pct = ac3.select_slider("现金预留", options=[0, 5, 8, 10, 15, 20], value=8, format_func=lambda value: f"{value}%")
+    st.caption("小资金模式会把持仓上限带入回测，并按 A 股整手、手续费和现金预留生成可执行的模拟买入计划。")
 
     if one_click:
         with st.status("正在建立策略研究台...", expanded=True) as status:
@@ -150,7 +156,7 @@ with st.expander("🎯 多策略回测与当下选股", expanded=True):
                     lookback_days=oc_period,
                     top_pct=0.2,
                     rebalance_days=10,
-                    max_positions=10,
+                    max_positions=account_positions,
                 )
                 st.session_state["one_click_picks"] = result
                 st.session_state["one_click_strategy_results"] = {}
@@ -162,9 +168,11 @@ with st.expander("🎯 多策略回测与当下选股", expanded=True):
     oc_result = st.session_state.get("one_click_picks")
     if oc_result:
         best = oc_result["best_strategy"]
+        if oc_period <= 90:
+            st.warning("短窗口叠加 1–2 只集中持仓会显著放大年化数字；请优先检查回撤、换手，并用更长窗口做滚动样本外验证。")
         result_view = st.radio(
             "结果视图",
-            ["🏆 冠军结果", "🧭 策略研究台", "📐 口径说明"],
+            ["🏆 冠军结果", "🤝 多策略共识", "🧭 策略研究台", "📐 口径说明"],
             horizontal=True,
             key="one_click_result_view",
             label_visibility="collapsed",
@@ -189,6 +197,70 @@ with st.expander("🎯 多策略回测与当下选股", expanded=True):
                     st.success("冠军选股已设为当前候选，可在页面下方加入模拟仓或生成 AI 点评。")
             else:
                 st.warning("冠军策略当前没有通过数据完整性检查的候选股。")
+
+        elif result_view == "🤝 多策略共识":
+            consensus = oc_result.get("consensus_analysis", {})
+            consensus_candidates = consensus.get("candidates", [])
+            if not consensus_candidates:
+                st.warning("当前没有同时满足买入/观察与风险过滤条件的共识候选。")
+            else:
+                st.markdown(
+                    f"**联合分析策略：** {' · '.join(consensus.get('strategy_labels', []))}  "
+                    "  \n共识分由策略覆盖率与各策略内部名次共同组成，不再训练第二个黑箱模型。"
+                )
+                st.dataframe(
+                    pd.DataFrame([
+                        {
+                            "代码": row["code"],
+                            "名称": row["name"],
+                            "共识分": row["consensus_score"],
+                            "支持数": row["support_count"],
+                            "支持策略": "、".join(row["strategy_labels"]),
+                            "现价": row["price"],
+                            "信号": row["action"],
+                            "风险": row["risk"],
+                        }
+                        for row in consensus_candidates
+                    ]),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+                plan = build_small_account_plan(
+                    consensus_candidates,
+                    cash=account_cash,
+                    max_positions=account_positions,
+                    reserve_ratio=reserve_pct / 100,
+                )
+                p1, p2, p3 = st.columns(3)
+                p1.metric("计划投入", f"¥{plan['invested']:,.0f}")
+                p2.metric("预计剩余现金", f"¥{plan['remaining_cash']:,.0f}")
+                p3.metric("计划持仓", f"{len(plan['orders'])}/{account_positions} 只")
+                if plan["orders"]:
+                    st.dataframe(
+                        pd.DataFrame([
+                            {
+                                "代码": order["code"],
+                                "名称": order["name"],
+                                "参考价": order["price"],
+                                "整手": order["lot_size"],
+                                "计划股数": order["shares"],
+                                "预计成本": order["estimated_cost"],
+                                "资金权重": f"{order['weight']:.1%}",
+                            }
+                            for order in plan["orders"]
+                        ]),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                    if st.button("采用共识候选并加入后续流程", type="primary", key="use_consensus_picks"):
+                        order_codes = {order["code"] for order in plan["orders"]}
+                        source_rows = [row["source"] for row in consensus_candidates if row["code"] in order_codes]
+                        st.session_state["picks_data"] = _candidate_rows_to_stocks(source_rows)
+                        st.session_state["picks_strategy"] = "multi_strategy_consensus"
+                        st.session_state["small_account_plan"] = plan
+                        st.success("共识候选与小资金买入计划已保存，可在页面下方加入模拟仓候选。")
+                else:
+                    st.info("当前现金在预留后不足以买入任一候选的一手；可减少预留、提高资金或等待价格变化。")
 
         elif result_view == "🧭 策略研究台":
             strategy_rows = oc_result.get("strategy_rows", [])

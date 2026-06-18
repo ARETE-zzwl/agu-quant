@@ -4,7 +4,7 @@
 - T+1: 当日买入次日才能卖出
 - 涨跌停: 主板±10%, 科创/创业±20%, ST±5%
 - 交易时间: 9:30-11:30, 13:00-15:00
-- 手数: 主板100股, 科创/创业板200股
+- 手数: 主板/创业板100股, 科创板200股
 - 费用: 印花税0.05%(单边卖), 佣金0.025%(最低5元), 过户费0.001%
 - 停牌/退市: 标记不可交易状态
 """
@@ -52,7 +52,7 @@ def _get_board(code: str) -> str:
 
 def _lot_size(code: str) -> int:
     """Minimum trading unit (股)."""
-    return 200 if _get_board(code) in ("star", "chinext") else 100
+    return 200 if _get_board(code) == "star" else 100
 
 
 def build_signal_order_plan(signal: dict, position: dict) -> dict:

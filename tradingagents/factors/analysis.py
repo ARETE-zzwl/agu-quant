@@ -55,6 +55,24 @@ def _forward_return(code, data, ds, next_ds):
     return float(df["Close"].loc[t2] / df["Close"].loc[t1] - 1)
 
 
+def _forward_return_after_days(code, data, ds, forward_days):
+    """Compute a return after N observed trading rows, not N input dates."""
+    df = data.get(code)
+    if df is None or df.empty:
+        return 0.0
+    signal_date = pd.Timestamp(ds)
+    available = df.index[df.index <= signal_date]
+    if len(available) == 0:
+        return 0.0
+    start = available[-1]
+    start_pos = int(df.index.get_loc(start))
+    end_pos = start_pos + max(1, int(forward_days))
+    if end_pos >= len(df.index):
+        return 0.0
+    end = df.index[end_pos]
+    return float(df["Close"].loc[end] / df["Close"].loc[start] - 1)
+
+
 def compute_ic(factor_name: str, codes: list[str], dates: list[str], forward_days: int = 5) -> dict:
     """Information Coefficient: factor score vs forward return."""
     from .library import get_factor
@@ -66,17 +84,19 @@ def compute_ic(factor_name: str, codes: list[str], dates: list[str], forward_day
         return {"ic_mean": 0, "ic_std": 0, "ic_ir": 0, "positive_ratio": 0, "ic_series": []}
 
     ic_values = []
+    ic_dates = []
     for i, ds in enumerate(dates[:-1]):
         scores = {}
         for code, df in data.items():
             v = _factor_value(factor, df, ds)
+            if factor.direction < 0:
+                v = -v
             if abs(v) > 0.000001:
                 scores[code] = v
 
-        next_ds = dates[min(i + 1, len(dates) - 1)]
         fwd = {}
         for code in scores:
-            fwd[code] = _forward_return(code, data, ds, next_ds)
+            fwd[code] = _forward_return_after_days(code, data, ds, forward_days)
 
         common = set(scores) & {c for c, r in fwd.items() if abs(r) > 0.000001}
         if len(common) < 3:
@@ -92,6 +112,7 @@ def compute_ic(factor_name: str, codes: list[str], dates: list[str], forward_day
         ic = s_rank.corr(f_rank)
         if not np.isnan(ic):
             ic_values.append(ic)
+            ic_dates.append(ds)
 
     if not ic_values:
         return {"ic_mean": 0, "ic_std": 0, "ic_ir": 0, "positive_ratio": 0, "ic_series": []}
@@ -102,8 +123,105 @@ def compute_ic(factor_name: str, codes: list[str], dates: list[str], forward_day
         "ic_std": round(float(np.std(ic_arr)), 4),
         "ic_ir": round(float(np.mean(ic_arr)) / max(float(np.std(ic_arr)), 0.001), 2),
         "positive_ratio": round(float((ic_arr > 0).mean()), 2),
-        "ic_series": list(zip(dates[:len(ic_values)], [round(float(v), 4) for v in ic_values])),
+        "ic_series": list(zip(ic_dates, [round(float(v), 4) for v in ic_values])),
     }
+
+
+def summarize_ic_decay(ic_by_horizon: dict[int, list[float]]) -> dict:
+    """Summarize RankIC strength and decay across forward-return horizons."""
+    horizons = []
+    for horizon in sorted(ic_by_horizon):
+        values = np.asarray(ic_by_horizon[horizon], dtype=float)
+        values = values[np.isfinite(values)]
+        mean = float(values.mean()) if len(values) else 0.0
+        std = float(values.std()) if len(values) else 0.0
+        horizons.append(
+            {
+                "horizon": int(horizon),
+                "ic_mean": round(mean, 4),
+                "ic_std": round(std, 4),
+                "ic_ir": round(mean / max(std, 0.001), 2),
+                "positive_ratio": round(float((values > 0).mean()), 2) if len(values) else 0.0,
+                "observations": int(len(values)),
+            }
+        )
+    if not horizons:
+        return {"horizons": [], "best_horizon": None, "half_life_horizon": None}
+    best = max(horizons, key=lambda row: abs(row["ic_mean"]))
+    baseline = abs(horizons[0]["ic_mean"])
+    half_life = next(
+        (row["horizon"] for row in horizons[1:] if abs(row["ic_mean"]) <= baseline / 2),
+        None,
+    )
+    return {
+        "horizons": horizons,
+        "best_horizon": best["horizon"],
+        "half_life_horizon": half_life,
+    }
+
+
+def orthogonalize_factor_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Sequentially residualize standardized factor columns cross-sectionally."""
+    clean = frame.astype(float).replace([np.inf, -np.inf], np.nan)
+    clean = clean.apply(lambda column: column.fillna(column.median()).fillna(0.0))
+    result = pd.DataFrame(index=clean.index)
+    basis: list[np.ndarray] = []
+    for name in clean.columns:
+        values = clean[name].to_numpy(dtype=float)
+        std = float(values.std())
+        vector = (values - values.mean()) / std if std > 1e-12 else np.zeros_like(values)
+        for previous in basis:
+            denominator = float(np.dot(previous, previous))
+            if denominator > 1e-12:
+                vector = vector - previous * float(np.dot(vector, previous) / denominator)
+        vector = vector - vector.mean()
+        residual_std = float(vector.std())
+        if residual_std > 1e-12:
+            vector = vector / residual_std
+        else:
+            vector = np.zeros_like(vector)
+        result[name] = vector
+        basis.append(vector)
+    return result
+
+
+def select_stable_factors(
+    reports: list[dict],
+    correlation: pd.DataFrame,
+    *,
+    max_factors: int = 8,
+    min_abs_ic: float = 0.02,
+    min_positive_ratio: float = 0.55,
+    max_correlation: float = 0.7,
+) -> list[dict]:
+    """Greedily retain strong, stable factors that are not near-duplicates."""
+    eligible = []
+    for report in reports:
+        ic_mean = float(report.get("ic_mean", 0) or 0)
+        positive_ratio = float(report.get("positive_ratio", 0) or 0)
+        ic_ir = float(report.get("ic_ir", 0) or 0)
+        if abs(ic_mean) < min_abs_ic or positive_ratio < min_positive_ratio:
+            continue
+        quality_score = abs(ic_mean) * (0.5 + positive_ratio) * max(abs(ic_ir), 0.1)
+        eligible.append({**report, "selection_score": round(quality_score, 6)})
+    eligible.sort(key=lambda row: row["selection_score"], reverse=True)
+
+    selected: list[dict] = []
+    for report in eligible:
+        name = report["factor"]
+        too_correlated = False
+        for chosen in selected:
+            other = chosen["factor"]
+            if name in correlation.index and other in correlation.columns:
+                value = correlation.loc[name, other]
+                if pd.notna(value) and abs(float(value)) > max_correlation:
+                    too_correlated = True
+                    break
+        if not too_correlated:
+            selected.append(report)
+        if len(selected) >= max(1, int(max_factors)):
+            break
+    return selected
 
 
 def factor_correlation(factor_names: list[str], codes: list[str], date: str) -> pd.DataFrame:
