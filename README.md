@@ -81,7 +81,6 @@ API 调用可能产生费用。行情接口也可能限流、延迟或暂时不�
 ```text
 web/             Streamlit 页面与组件
 cli/             命令行入口
-tradingagents/   数据接口、分析流程、因子和模拟交易模块
 docs/knowledge_base/  本地研究资料
 tests/           测试
 ```
@@ -125,7 +124,7 @@ The UI lists market views, sectors and screening as basic features, and stock re
 
 ### Source layout
 
-`web/` contains Streamlit pages, `cli/` the command-line entry, and `tradingagents/` the data, analysis, factor and paper-trading modules. Research notes live in `docs/knowledge_base/`; tests live in `tests/`.
+`web/` contains Streamlit pages and `cli/` the command-line entry. Research notes live in `docs/knowledge_base/`; tests live in `tests/`.
 
 ## License
 
