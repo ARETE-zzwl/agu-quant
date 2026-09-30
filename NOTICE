@@ -18,3 +18,7 @@ Modifications in this fork include:
 - Various prompt and pipeline adaptations for A-share market specifics
 
 See CHANGES_FROM_UPSTREAM.md for the full list of modifications.
+
+agu-quant
+Package metadata, README, project introduction, and CLI branding updated by
+ARETE-zzwl on 2026-09-30. The attribution notices above are retained.

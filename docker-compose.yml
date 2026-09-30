@@ -1,5 +1,5 @@
 services:
-  tradingagents:
+  agu-quant:
     build: .
     env_file:
       - .env
@@ -15,7 +15,7 @@ services:
     profiles:
       - ollama
 
-  tradingagents-ollama:
+  agu-quant-ollama:
     build: .
     env_file:
       - .env

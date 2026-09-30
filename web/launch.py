@@ -1,4 +1,4 @@
-"""Launch the TradingAgents web UI via `tradingagents-web` command."""
+"""Launch the agu-quant web UI via the `agu-quant-web` command."""
 
 from __future__ import annotations
 
